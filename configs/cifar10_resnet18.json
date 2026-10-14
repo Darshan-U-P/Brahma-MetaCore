@@ -1,0 +1,15 @@
+
+{
+  "experiment_name": "metacore_milestone2_cifar10_resnet18",
+  "seed": 42,
+  "num_classes": 10,
+  "batch_size": 128,
+  "epochs": 20,
+  "learning_rate": 0.1,
+  "momentum": 0.9,
+  "weight_decay": 0.0005,
+  "num_workers": 0,
+  "use_amp": true,
+  "scheduler": "cosine",
+  "save_every_epoch": true
+}

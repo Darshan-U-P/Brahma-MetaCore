@@ -1,0 +1,19 @@
+{
+  "experiment_name": "metacore_metaanalyzer_v0_2_channel_ablation",
+  "seed_for_split": 42,
+  "training_examples": 45000,
+  "validation_examples": 5000,
+  "training_epochs": 20,
+  "batch_size": 128,
+  "learning_rate": 0.1,
+  "momentum": 0.9,
+  "weight_decay": 0.0005,
+  "amp": true,
+  "ablation_seed": 2026,
+  "candidate_channels_per_layer": 32,
+  "random_controls_per_layer": 8,
+  "top_k": 5,
+  "layers": ["layer2.1.bn1", "layer3.1.bn1", "layer4.1.bn1"],
+  "validation_only": true,
+  "official_test_set_used": false
+}
