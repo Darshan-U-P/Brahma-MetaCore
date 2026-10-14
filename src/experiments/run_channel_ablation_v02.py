@@ -243,6 +243,8 @@ def main() -> None:
                         help="Number of highest-loss-impact discovery channels to compare with controls.")
     parser.add_argument("--max-validation-examples", type=int, default=0,
                         help="Optional quick pilot limit; 0 evaluates the entire 5,000-image validation split.")
+    parser.add_argument("--output", default=None,
+                        help="Optional output JSON path; defaults to the original report path.")
     parser.add_argument("--layers", default=",".join(DEFAULT_LAYERS),
                         help="Comma-separated module paths; defaults to layer2.1.bn1,layer3.1.bn1,layer4.1.bn1.")
     args = parser.parse_args()
@@ -456,7 +458,10 @@ def main() -> None:
         ),
         "layers": layer_results,
     }
-    output_path = REPORT_DIR / "meta_analyzer_v0_2_channel_ablation.json"
+    output_path = Path(args.output) if args.output else REPORT_DIR / "meta_analyzer_v0_2_channel_ablation.json"
+    if not output_path.is_absolute():
+        output_path = ROOT / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output, indent=2, allow_nan=False), encoding="utf-8")
     print(f"\nCompleted {interventions_completed} channel interventions in {output['elapsed_seconds']/60:.1f} minutes.")
     print(f"Saved structured report: {output_path}")
