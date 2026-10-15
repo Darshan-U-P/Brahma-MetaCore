@@ -13,7 +13,7 @@ These are research goals, not established capabilities. Each stage must be teste
 Brahma MetaCore has progressed from model inspection to a controlled, preliminary cross-model channel-importance transfer experiment. The strongest current evidence is **representational correspondence**; practical importance transfer is promising but not yet reliable enough to claim a general advantage.
 
 | Finding | Measured result | Interpretation |
-|---|---:|---|
+| --- | ---: | --- |
 | Activation alignment, `layer2.1.bn1` | 0.651 matched vs 0.247 same-index mean absolute correlation | Stronger activation correspondence after matching |
 | Activation alignment, `layer3.1.bn1` | 0.598 vs 0.221 | Stronger activation correspondence after matching |
 | Activation alignment, `layer4.1.bn1` | 0.692 vs 0.233 | Stronger activation correspondence after matching |
@@ -141,13 +141,9 @@ These are descriptive results, not statistically conclusive evidence. The same t
 A Random Forest regressor predicted absolute channel-ablation loss changes from activation statistics, batch-normalization parameters, and incoming/outgoing weight norms. The dataset contained 896 channel records, with held-out channels evaluated within each layer.
 
 | Layer | Random Forest Spearman | Best tested single-feature heuristic |
-
-|---|---:|---:|
-
+| --- | ---: | ---: |
 | `layer2.1.bn1` | 0.497 | 0.611 — outgoing weight norm |
-
 | `layer3.1.bn1` | 0.300 | 0.330 — activation magnitude |
-
 | `layer4.1.bn1` | 0.475 | 0.501 — incoming weight norm |
 
 The Random Forest did not outperform the best individual heuristic in any layer. Features and labels came from the same validation split, channels are not independent observations, and holding out channels does not establish generalization to new models. This was a predictive pilot, not a demonstration of generalizable model understanding.
@@ -167,17 +163,11 @@ This experiment tested transfer from a seed-42 source model to an independently 
 Key target-model results:
 
 | Method | Spearman correlation | Top-20 precision |
-
-|---|---:|---:|
-
+| --- | ---: | ---: |
 | Random Forest | 0.545 | 0.40 |
-
 | Incoming weight norm | 0.550 | 0.35 |
-
 | Outgoing weight norm | 0.524 | 0.35 |
-
 | Activation mean absolute value | 0.479 | 0.35 |
-
 | Activation standard deviation | 0.380 | 0.45 |
 
 The Random Forest showed a positive cross-model rank correlation, but incoming weight norm had a slightly higher Spearman correlation and activation standard deviation had higher top-20 precision. Results differed by layer. This is preliminary evidence that some source-model statistics relate to target-model importance, not proof of a reliable general predictor.
@@ -217,15 +207,10 @@ Can activation signatures identify corresponding channels across independently t
 #### Baseline measurements on the intervention subset
 
 | Seed | Accuracy | Loss |
-
-|---|---:|---:|
-
+| --- | ---: | ---: |
 | 42 (source) | 92.00% | 0.245267 |
-
 | 123 | 92.20% | 0.267273 |
-
 | 456 | 91.56% | 0.262167 |
-
 | 789 | 92.40% | 0.255667 |
 
 These are measurements on the 2,500-example intervention subset, not official test-set benchmarks.
@@ -235,13 +220,9 @@ These are measurements on the 2,500-example intervention subset, not official te
 Mean absolute matched activation correlation, averaged across the three target seeds:
 
 | Layer | Activation-matched correlation | Same-index correlation |
-
-|---|---:|---:|
-
+| --- | ---: | ---: |
 | `layer2.1.bn1` | 0.651 | 0.247 |
-
 | `layer3.1.bn1` | 0.598 | 0.221 |
-
 | `layer4.1.bn1` | 0.692 | 0.233 |
 
 Matched correlations were substantially higher than same-index correlations. Fewer than 1.6% of matched channels retained the same index in any reported target-layer comparison.
@@ -253,25 +234,15 @@ Matched correlations were substantially higher than same-index correlations. Few
 Top-20 precision for predicting the target model's 20 most important channels from source-model measured importance:
 
 | Target seed | Layer | Same-index precision | Aligned precision | Random expectation |
-
-|---|---|---:|---:|---:|
-
+| --- | --- | ---: | ---: | ---: |
 | 123 | Layer 2 | 0.15 | 0.25 | 0.156 |
-
 | 123 | Layer 3 | 0.00 | 0.10 | 0.078 |
-
 | 123 | Layer 4 | 0.10 | 0.05 | 0.039 |
-
 | 456 | Layer 2 | 0.20 | 0.25 | 0.156 |
-
 | 456 | Layer 3 | 0.10 | 0.20 | 0.078 |
-
 | 456 | Layer 4 | 0.05 | 0.00 | 0.039 |
-
 | 789 | Layer 2 | 0.20 | 0.30 | 0.156 |
-
 | 789 | Layer 3 | 0.00 | 0.05 | 0.078 |
-
 | 789 | Layer 4 | 0.05 | 0.20 | 0.039 |
 
 Aligned top-20 precision was higher in **7 of 9 comparisons**, but some aligned results were below the random expectation, and improvements varied by layer and seed. Spearman correlations were generally weak. These descriptive results do not establish statistical significance or consistent importance-transfer improvement.
@@ -305,7 +276,7 @@ The experiment provides a useful signal for **cross-model representation alignme
 v0.7 reanalyzed v0.6 results using repeated subsets, randomized mappings, and channel-level bootstrap diagnostics. It compared nine target-layer cases (three target seeds × three layers).
 
 | Layer | Mean matched-minus-same-index absolute activation correlation | Importance Spearman improved | Top-k precision improved |
-|---|---:|---:|---:|
+| --- | ---: | ---: | ---: |
 | `layer2.1.bn1` | +0.4043 | 1/3 target seeds | 3/3 target seeds |
 | `layer3.1.bn1` | +0.3763 | 2/3 target seeds | 3/3 target seeds |
 | `layer4.1.bn1` | +0.4591 | 1/3 target seeds | 1/3 target seeds |
@@ -341,7 +312,7 @@ Does source-to-target channel alignment help use a source model's measured chann
 Top-10% precision measures how many of the target's genuinely most important channels are recovered by transferring the source ranking. Results are averaged over nine target-layer comparisons.
 
 | Method | Mean Top-10% precision |
-|---|---:|
+| --- | ---: |
 | Same-index transfer | 8.12% |
 | Random-mapping control mean | 10.25% |
 | Activation-aligned transfer | **11.75%** |
@@ -353,7 +324,7 @@ Aligned transfer improved mean precision by **3.63 percentage points** over same
 ### Layer-by-layer primary results
 
 | Target | Layer | Same-index P@10% | Aligned P@10% | Random-map mean P@10% |
-|---|---|---:|---:|---:|
+| --- | --- | ---: | ---: | ---: |
 | seed 123 | `layer2.1.bn1` | 7.69% | **15.38%** | 10.45% |
 | seed 123 | `layer3.1.bn1` | 7.69% | **11.54%** | 10.25% |
 | seed 123 | `layer4.1.bn1` | **15.38%** | 11.54% | 10.17% |
