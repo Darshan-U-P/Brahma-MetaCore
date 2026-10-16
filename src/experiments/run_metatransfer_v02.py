@@ -29,7 +29,6 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from scipy.stats import spearmanr
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
@@ -53,7 +52,6 @@ FRACTIONS = (0.05, 0.10, 0.20)
 DEFAULT_RANDOM_MAPPINGS = 1000
 DEFAULT_SEED = 20261017
 BATCH_SIZE = 128
-DEFAULT_CHANNELS_PER_FORWARD = 4
 DATA_URLS = {
     "images": "https://raw.githubusercontent.com/modestyachts/CIFAR-10.1/master/datasets/cifar10.1_v6_data.npy",
     "labels": "https://raw.githubusercontent.com/modestyachts/CIFAR-10.1/master/datasets/cifar10.1_v6_labels.npy",
@@ -265,159 +263,7 @@ def load_frozen_inputs():
     return v01_report, source_payload, source_cache_path, source_cache_hash
 
 
-def prepare_external_tensors(images: np.ndarray, labels: np.ndarray, device: torch.device):
-    """Decode/normalize CIFAR-10.1 once instead of transforming it for every ablation.
-
-    The resulting image tensor stays in host memory; batches are transferred to the
-    device as needed. This is numerically equivalent to ToTensor + Normalize used
-    by the original single-channel implementation.
-    """
-    pixels = torch.from_numpy(np.array(images, copy=True)).permute(0, 3, 1, 2).contiguous()
-    x = pixels.to(dtype=torch.float32).div_(255.0)
-    mean = torch.tensor(v04.MEAN, dtype=torch.float32).view(1, 3, 1, 1)
-    std = torch.tensor(v04.STD, dtype=torch.float32).view(1, 3, 1, 1)
-    x.sub_(mean).div_(std)
-    y = torch.from_numpy(np.array(labels, dtype=np.int64, copy=True))
-    if device.type == "cuda":
-        # CIFAR-10.1 is small (~25 MB normalized); pin once, not once per channel.
-        x = x.pin_memory()
-        y = y.pin_memory()
-    return x, y
-
-
-@torch.inference_mode()
-def measure_channel_effects_batched(
-    model,
-    images_tensor: torch.Tensor,
-    labels_tensor: torch.Tensor,
-    device: torch.device,
-    model_key: str,
-    channels_per_forward: int = DEFAULT_CHANNELS_PER_FORWARD,
-    image_batch_size: int = BATCH_SIZE,
-):
-    """Measure channel ablations in grouped forwards to reduce Python/GPU launch overhead.
-
-    Each grouped forward repeats a batch K times, with a different single channel
-    zeroed in each K-sized group. Thus every channel still sees every evaluation
-    image, and effects remain single-channel ablation effects. Only the execution
-    batching changes; the model, examples, mappings, loss definition, and metrics do not.
-    """
-    if channels_per_forward < 1:
-        raise ValueError("channels_per_forward must be at least 1")
-    model.eval()
-    n_examples = int(labels_tensor.numel())
-    if int(images_tensor.shape[0]) != n_examples:
-        raise ValueError("Image and label counts do not match")
-
-    def batch_slices():
-        for start in range(0, n_examples, image_batch_size):
-            stop = min(start + image_batch_size, n_examples)
-            yield start, stop
-
-    # Baseline is computed once, not repeated separately for every channel.
-    baseline_loss_sum = 0.0
-    baseline_correct = 0
-    baseline_total = 0
-    for start, stop in batch_slices():
-        xb = images_tensor[start:stop].to(device, non_blocking=True)
-        yb = labels_tensor[start:stop].to(device, non_blocking=True)
-        logits = model(xb)
-        per_example_loss = F.cross_entropy(logits, yb, reduction="none")
-        baseline_loss_sum += float(per_example_loss.sum().item())
-        baseline_correct += int((logits.argmax(dim=1) == yb).sum().item())
-        baseline_total += int(yb.numel())
-    if baseline_total != n_examples:
-        raise RuntimeError(f"{model_key}: baseline processed {baseline_total}/{n_examples} examples")
-    baseline_loss = baseline_loss_sum / n_examples
-    baseline_summary = {
-        "accuracy": baseline_correct / n_examples,
-        "loss": baseline_loss,
-        "examples": n_examples,
-    }
-    print(
-        f"{model_key} intervention baseline: accuracy={baseline_summary['accuracy'] * 100:.2f}%, "
-        f"loss={baseline_loss:.6f}, examples={n_examples}"
-    )
-
-    effects: dict[str, dict[str, float | int]] = {}
-    total_channels = sum(int(v06.ablation.get_module_by_name(model, layer).num_features) for layer in v06.LAYERS)
-    completed = 0
-    for layer in v06.LAYERS:
-        module = v06.ablation.get_module_by_name(model, layer)
-        width = int(module.num_features)
-        for chunk_start in range(0, width, channels_per_forward):
-            channel_ids = list(range(chunk_start, min(chunk_start + channels_per_forward, width)))
-            k = len(channel_ids)
-            state = {"batch_size": None}
-
-            def ablation_group_hook(_module, _inputs, output):
-                if not isinstance(output, torch.Tensor) or output.ndim != 4:
-                    raise RuntimeError(f"Unexpected activation output at {layer}: {getattr(output, 'shape', None)}")
-                base_n = state["batch_size"]
-                if base_n is None or output.shape[0] != k * base_n:
-                    raise RuntimeError(
-                        f"Grouped ablation batch mismatch at {layer}: activation={output.shape[0]}, "
-                        f"expected={k}*{base_n}"
-                    )
-                if output.shape[1] != width:
-                    raise RuntimeError(f"Activation width changed unexpectedly at {layer}")
-                modified = output.clone(memory_format=torch.contiguous_format)
-                grouped = modified.view(k, base_n, output.shape[1], output.shape[2], output.shape[3])
-                for group_index, channel_index in enumerate(channel_ids):
-                    grouped[group_index, :, channel_index, :, :] = 0
-                return grouped.view_as(output)
-
-            loss_sums = np.zeros(k, dtype=np.float64)
-            correct_counts = np.zeros(k, dtype=np.int64)
-            hook_calls = 0
-            handle = module.register_forward_hook(ablation_group_hook)
-            try:
-                for start, stop in batch_slices():
-                    xb = images_tensor[start:stop].to(device, non_blocking=True)
-                    yb = labels_tensor[start:stop].to(device, non_blocking=True)
-                    base_n = int(yb.numel())
-                    state["batch_size"] = base_n
-                    # Repeat whole image batches K times; hook applies one mask per group.
-                    grouped_x = xb.repeat((k, 1, 1, 1))
-                    logits = model(grouped_x).reshape(k, base_n, -1)
-                    grouped_y = yb.unsqueeze(0).expand(k, -1)
-                    losses = F.cross_entropy(
-                        logits.reshape(k * base_n, -1),
-                        grouped_y.reshape(k * base_n),
-                        reduction="none",
-                    ).view(k, base_n)
-                    loss_sums += losses.sum(dim=1).double().cpu().numpy()
-                    correct_counts += (logits.argmax(dim=2) == grouped_y).sum(dim=1).cpu().numpy()
-                    hook_calls += 1
-            finally:
-                handle.remove()
-
-            expected_batches = (n_examples + image_batch_size - 1) // image_batch_size
-            if hook_calls != expected_batches:
-                raise RuntimeError(
-                    f"{model_key} {layer} channels {channel_ids}: hook called {hook_calls} times, "
-                    f"expected {expected_batches}"
-                )
-            for group_index, channel_index in enumerate(channel_ids):
-                ablated_loss = float(loss_sums[group_index] / n_examples)
-                delta = ablated_loss - baseline_loss
-                effects[f"{layer}|{channel_index}"] = {
-                    "signed_delta_loss": float(delta),
-                    "abs_delta_loss": float(abs(delta)),
-                    "hook_calls": int(hook_calls),
-                    "examples": n_examples,
-                    "execution_group_size": k,
-                }
-            completed += k
-            if completed % 32 == 0 or completed == total_channels:
-                print(f"  {model_key}: measured {completed}/{total_channels} channel interventions")
-
-    if len(effects) != total_channels:
-        raise RuntimeError(f"{model_key}: expected {total_channels} channel effects, got {len(effects)}")
-    return effects, baseline_summary
-
-
-def measure_target_effects(target_model: str, images, labels, device: torch.device, dataset_hashes: dict[str, str], channels_per_forward: int):
+def measure_target_effects(target_model: str, images, labels, device: torch.device, dataset_hashes: dict[str, str]):
     checkpoint = v06.CHECKPOINTS[target_model]
     if not checkpoint.is_file():
         raise FileNotFoundError(f"Missing target checkpoint: {checkpoint}")
@@ -448,23 +294,27 @@ def measure_target_effects(target_model: str, images, labels, device: torch.devi
             )
         print(f"Reusing validated external-effect cache: {cache_path.relative_to(ROOT)}")
     else:
-        images_tensor, labels_tensor = prepare_external_tensors(images, labels, device)
+        base_dataset = ArrayCIFAR10Dataset(images, labels)
+        loader = DataLoader(
+            base_dataset,
+            batch_size=BATCH_SIZE,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=(device.type == "cuda"),
+            drop_last=False,
+        )
         model, checkpoint_payload = v06.load_model(checkpoint, device)
         print(
             f"\nMeasuring external target effects: {target_model}; examples=2000; "
-            f"checkpoint epoch={int(checkpoint_payload.get('epoch', -1))}; "
-            f"channels per forward={channels_per_forward}; image batch={BATCH_SIZE}"
+            f"checkpoint epoch={int(checkpoint_payload.get('epoch', -1))}"
         )
-        measured, baseline = measure_channel_effects_batched(
+        measured, baseline = v06.measure_channel_effects(
             model=model,
-            images_tensor=images_tensor,
-            labels_tensor=labels_tensor,
+            loader=loader,
             device=device,
             model_key=f"{target_model}/CIFAR-10.1-v6",
-            channels_per_forward=channels_per_forward,
-            image_batch_size=BATCH_SIZE,
+            channels_per_layer=None,
         )
-        del images_tensor, labels_tensor
         del model
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -472,11 +322,6 @@ def measure_target_effects(target_model: str, images, labels, device: torch.devi
             "metadata": expected_metadata,
             "effects": measured,
             "baseline": baseline,
-            "execution_metadata": {
-                "method": "grouped_single_channel_ablation_forwards",
-                "channels_per_forward_requested": int(channels_per_forward),
-                "image_batch_size": int(BATCH_SIZE),
-            },
         }
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         if cache_path.exists():
@@ -496,19 +341,6 @@ def measure_target_effects(target_model: str, images, labels, device: torch.devi
             item = effects.get(f"{layer}|{channel}")
             if not isinstance(item, dict) or int(item.get("examples", -1)) != 2000:
                 raise ValueError(f"Missing or invalid external effect for {target_model}/{layer}/{channel}")
-    if "execution_metadata" not in payload:
-        # Existing caches made by the original v0.2 implementation remain valid;
-        # label their execution method accurately rather than pretending they used batching.
-        any_grouped_entry = any(
-            isinstance(item, dict) and "execution_group_size" in item
-            for item in effects.values()
-        )
-        payload["execution_metadata"] = {
-            "method": "grouped_single_channel_ablation_forwards" if any_grouped_entry else "legacy_single_channel_forwards",
-            "channels_per_forward_requested": int(channels_per_forward) if any_grouped_entry else 1,
-            "image_batch_size": int(BATCH_SIZE),
-            "note": "Existing effect cache reused without modification." if not any_grouped_entry else "Grouped channel interventions were cached.",
-        }
     payload["cache_path"] = str(cache_path.relative_to(ROOT))
     payload["cache_sha256"] = sha256_file(cache_path)
     return payload
@@ -564,8 +396,6 @@ def main():
     parser.add_argument("--download-data", action="store_true", help="Download and validate CIFAR-10.1 v6; exit without inference.")
     parser.add_argument("--audit-only", action="store_true", help="Validate frozen v0.1 inputs, external data files, and checkpoints; no inference or report writes.")
     parser.add_argument("--random-mappings", type=int, default=DEFAULT_RANDOM_MAPPINGS, help="Random source-to-target permutations per target/layer (minimum 100).")
-    parser.add_argument("--channels-per-forward", type=int, default=DEFAULT_CHANNELS_PER_FORWARD,
-                        help="Channel interventions evaluated in one grouped forward (default 4; use 2 if CUDA runs out of memory).")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Seed for random mapping controls.")
     parser.add_argument("--output", default=None, help="JSON output path; refuses to overwrite existing JSON or Markdown reports.")
     args = parser.parse_args()
@@ -573,8 +403,6 @@ def main():
         parser.error("Use only one of --download-data and --audit-only at a time.")
     if args.random_mappings < 100:
         parser.error("--random-mappings must be at least 100.")
-    if args.channels_per_forward < 1 or args.channels_per_forward > 16:
-        parser.error("--channels-per-forward must be between 1 and 16.")
 
     if args.download_data:
         download_dataset()
@@ -619,10 +447,7 @@ def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     target_payloads = {}
     for target in TARGET_MODELS:
-        target_payloads[target] = measure_target_effects(
-            target, images, labels, device, data_hashes,
-            channels_per_forward=args.channels_per_forward,
-        )
+        target_payloads[target] = measure_target_effects(target, images, labels, device, data_hashes)
 
     rng = np.random.default_rng(args.seed)
     results = {}
@@ -707,13 +532,6 @@ def main():
         "layers": list(v06.LAYERS),
         "seed": int(args.seed),
         "random_mappings_per_target_layer": int(args.random_mappings),
-        "execution_optimization": {
-            "method": "grouped_single_channel_ablation_forwards",
-            "channels_per_forward_requested": int(args.channels_per_forward),
-            "image_batch_size": int(BATCH_SIZE),
-            "normalization_precomputed_once_per_target": True,
-            "scientific_intervention_unchanged": "Each group duplicates the same images and zeros a different single channel in each image group; every channel still evaluates the full CIFAR-10.1 v6 image set.",
-        },
         "primary_metric": "Top-10% precision for identifying the target model's top-10% channels by absolute loss change measured on CIFAR-10.1 v6.",
         "frozen_inputs": {
             "v01_report_path": str(V01_REPORT.relative_to(ROOT)),
@@ -733,12 +551,7 @@ def main():
             "official_cifar10_test_set_loaded": False,
         },
         "target_eval_caches": {
-            target: {
-                "path": payload["cache_path"],
-                "sha256": payload["cache_sha256"],
-                "baseline": payload["baseline"],
-                "execution_metadata": payload.get("execution_metadata", {}),
-            }
+            target: {"path": payload["cache_path"], "sha256": payload["cache_sha256"], "baseline": payload["baseline"]}
             for target, payload in target_payloads.items()
         },
         "results": results,
@@ -779,7 +592,6 @@ def main():
         "- Target evaluation images: **2,000 CIFAR-10.1 v6 examples**.",
         f"- Random mappings per target/layer: **{args.random_mappings}**.",
         "- New target seeds: **not included in this stage**.",
-        f"- Execution optimization: grouped single-channel ablations, up to **{args.channels_per_forward} channels per forward** with image batch **{BATCH_SIZE}**; the ablation definition is unchanged.",
         "",
         "## Primary results",
         "",

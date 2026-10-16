@@ -8,23 +8,38 @@ The long-term goal is to develop a system that can **map a model, learn from its
 
 These are research goals, not established capabilities. Each stage must be tested against controlled baselines, and conclusions must remain proportional to the evidence.
 
-## Current Evidence Snapshot (15 October 2026)
+## Current Evidence Snapshot (16 October 2026)
 
-Brahma MetaCore has progressed from model inspection to a controlled, preliminary cross-model channel-importance transfer experiment. The strongest current evidence is **representational correspondence**; practical importance transfer is promising but not yet reliable enough to claim a general advantage.
+Brahma MetaCore's long-term objective is to understand how model architecture, parameters, weights, and learned representations produce capabilities, then use that understanding to construct or modify another model. **The current experiments have not yet demonstrated model reconstruction or capability-preserving new-weight generation.**
 
-| Finding | Measured result | Interpretation |
-| --- | ---: | --- |
-| Activation alignment, `layer2.1.bn1` | 0.651 matched vs 0.247 same-index mean absolute correlation | Stronger activation correspondence after matching |
-| Activation alignment, `layer3.1.bn1` | 0.598 vs 0.221 | Stronger activation correspondence after matching |
-| Activation alignment, `layer4.1.bn1` | 0.692 vs 0.233 | Stronger activation correspondence after matching |
-| MetaTransfer v0.1 mean Top-10% precision | 11.75% aligned vs 8.12% same-index vs 10.25% random-map mean | Initial transfer signal; the advantage varies by target and layer |
+### Evidence summary
+
+| Claim / experiment | Evidence | Conclusion |
+| --- | --- | --- |
+| Activation-based channel alignment (v0.6/v0.7) | Mean absolute matched activation correlations: layer2 0.651 vs 0.247 same-index; layer3 0.598 vs 0.221; layer4 0.692 vs 0.233 | Strong correspondence signal in the tested ResNet-18/CIFAR-10 setup |
+| Importance transfer (v0.1) | Mean Top-10% precision: aligned 11.75%, same-index 8.12%, random-map mean 10.25% | Initial positive signal, but inconsistent across layers and target seeds |
+| External-image replication (v0.2, CIFAR-10.1 v6) | Aligned 13.03%, same-index 13.25%, random-map mean 10.18%; aligned beat same-index in 3/9 comparisons | The predefined directional success rule failed; importance-transfer advantage not replicated |
+| New target training (v0.3 preparation) | Seed 2027: 91.74% best validation accuracy; seed 31415: 92.32% | New target checkpoints trained successfully; this is not evidence that transfer works |
+| Model reconstruction / new-weight generation | Not yet tested | Core objective remains unproven |
 
 ![Activation alignment graph](assets/activation_alignment_v06.png)
 
-![MetaTransfer aggregate precision graph](assets/metatransfer_precision_aggregate.png)
+![MetaTransfer v0.1 aggregate precision graph](assets/metatransfer_precision_aggregate.png)
 
-**Evidence boundary:** the experiments cover CIFAR-10 and CIFAR-adapted ResNet-18 checkpoints. The held-out target-effect subset was disjoint from source-importance scoring and feature-signature examples, but it comes from a validation partition used in earlier work. These results do **not** demonstrate semantic understanding, general intelligence, successful model construction, or reduced pretraining requirements.
+![v0.1 versus v0.2 comparison](assets/metatransfer_v01_vs_v02_failure.png)
 
+![v0.3 new target training results](assets/metatransfer_v03_new_seed_training.png)
+
+![MetaCore intended research loop and evidence boundary](assets/metacore_goal_and_evidence_boundary.png)
+
+### Evidence and failure boundary
+
+- **Supported:** activation-signature matching finds more correlated channel patterns than same-index matching in the tested models.
+- **Preliminary:** activation alignment can sometimes improve transfer of channel-importance rankings.
+- **Negative / failed replication:** on CIFAR-10.1 v6, aligned Top-10% precision (13.03%) was slightly below same-index precision (13.25%), and the predefined directional rule failed.
+- **Not tested yet:** constructing a new model from a model map; generating new weights that preserve capabilities; incorporating new data while retaining old capabilities; or reducing pretraining data/compute.
+
+The v0.2 experiment used the same target checkpoints as v0.1, so it is an external-image evaluation, **not** independent-seed replication. The v0.3 target checkpoints with seeds 2027 and 31415 are new independently initialized models, but the v0.3 transfer evaluation has not yet been confirmed complete. The nine layer-level comparisons are dependent and must not be treated as nine independent model replications.
 
 ## Core Research Loop
 
@@ -141,9 +156,13 @@ These are descriptive results, not statistically conclusive evidence. The same t
 A Random Forest regressor predicted absolute channel-ablation loss changes from activation statistics, batch-normalization parameters, and incoming/outgoing weight norms. The dataset contained 896 channel records, with held-out channels evaluated within each layer.
 
 | Layer | Random Forest Spearman | Best tested single-feature heuristic |
-| --- | ---: | ---: |
+
+|---|---:|---:|
+
 | `layer2.1.bn1` | 0.497 | 0.611 — outgoing weight norm |
+
 | `layer3.1.bn1` | 0.300 | 0.330 — activation magnitude |
+
 | `layer4.1.bn1` | 0.475 | 0.501 — incoming weight norm |
 
 The Random Forest did not outperform the best individual heuristic in any layer. Features and labels came from the same validation split, channels are not independent observations, and holding out channels does not establish generalization to new models. This was a predictive pilot, not a demonstration of generalizable model understanding.
@@ -163,11 +182,17 @@ This experiment tested transfer from a seed-42 source model to an independently 
 Key target-model results:
 
 | Method | Spearman correlation | Top-20 precision |
-| --- | ---: | ---: |
+
+|---|---:|---:|
+
 | Random Forest | 0.545 | 0.40 |
+
 | Incoming weight norm | 0.550 | 0.35 |
+
 | Outgoing weight norm | 0.524 | 0.35 |
+
 | Activation mean absolute value | 0.479 | 0.35 |
+
 | Activation standard deviation | 0.380 | 0.45 |
 
 The Random Forest showed a positive cross-model rank correlation, but incoming weight norm had a slightly higher Spearman correlation and activation standard deviation had higher top-20 precision. Results differed by layer. This is preliminary evidence that some source-model statistics relate to target-model importance, not proof of a reliable general predictor.
@@ -207,10 +232,15 @@ Can activation signatures identify corresponding channels across independently t
 #### Baseline measurements on the intervention subset
 
 | Seed | Accuracy | Loss |
-| --- | ---: | ---: |
+
+|---|---:|---:|
+
 | 42 (source) | 92.00% | 0.245267 |
+
 | 123 | 92.20% | 0.267273 |
+
 | 456 | 91.56% | 0.262167 |
+
 | 789 | 92.40% | 0.255667 |
 
 These are measurements on the 2,500-example intervention subset, not official test-set benchmarks.
@@ -220,9 +250,13 @@ These are measurements on the 2,500-example intervention subset, not official te
 Mean absolute matched activation correlation, averaged across the three target seeds:
 
 | Layer | Activation-matched correlation | Same-index correlation |
-| --- | ---: | ---: |
+
+|---|---:|---:|
+
 | `layer2.1.bn1` | 0.651 | 0.247 |
+
 | `layer3.1.bn1` | 0.598 | 0.221 |
+
 | `layer4.1.bn1` | 0.692 | 0.233 |
 
 Matched correlations were substantially higher than same-index correlations. Fewer than 1.6% of matched channels retained the same index in any reported target-layer comparison.
@@ -234,15 +268,25 @@ Matched correlations were substantially higher than same-index correlations. Few
 Top-20 precision for predicting the target model's 20 most important channels from source-model measured importance:
 
 | Target seed | Layer | Same-index precision | Aligned precision | Random expectation |
-| --- | --- | ---: | ---: | ---: |
+
+|---|---|---:|---:|---:|
+
 | 123 | Layer 2 | 0.15 | 0.25 | 0.156 |
+
 | 123 | Layer 3 | 0.00 | 0.10 | 0.078 |
+
 | 123 | Layer 4 | 0.10 | 0.05 | 0.039 |
+
 | 456 | Layer 2 | 0.20 | 0.25 | 0.156 |
+
 | 456 | Layer 3 | 0.10 | 0.20 | 0.078 |
+
 | 456 | Layer 4 | 0.05 | 0.00 | 0.039 |
+
 | 789 | Layer 2 | 0.20 | 0.30 | 0.156 |
+
 | 789 | Layer 3 | 0.00 | 0.05 | 0.078 |
+
 | 789 | Layer 4 | 0.05 | 0.20 | 0.039 |
 
 Aligned top-20 precision was higher in **7 of 9 comparisons**, but some aligned results were below the random expectation, and improvements varied by layer and seed. Spearman correlations were generally weak. These descriptive results do not establish statistical significance or consistent importance-transfer improvement.
@@ -276,7 +320,7 @@ The experiment provides a useful signal for **cross-model representation alignme
 v0.7 reanalyzed v0.6 results using repeated subsets, randomized mappings, and channel-level bootstrap diagnostics. It compared nine target-layer cases (three target seeds × three layers).
 
 | Layer | Mean matched-minus-same-index absolute activation correlation | Importance Spearman improved | Top-k precision improved |
-| --- | ---: | ---: | ---: |
+|---|---:|---:|---:|
 | `layer2.1.bn1` | +0.4043 | 1/3 target seeds | 3/3 target seeds |
 | `layer3.1.bn1` | +0.3763 | 2/3 target seeds | 3/3 target seeds |
 | `layer4.1.bn1` | +0.4591 | 1/3 target seeds | 1/3 target seeds |
@@ -312,7 +356,7 @@ Does source-to-target channel alignment help use a source model's measured chann
 Top-10% precision measures how many of the target's genuinely most important channels are recovered by transferring the source ranking. Results are averaged over nine target-layer comparisons.
 
 | Method | Mean Top-10% precision |
-| --- | ---: |
+|---|---:|
 | Same-index transfer | 8.12% |
 | Random-mapping control mean | 10.25% |
 | Activation-aligned transfer | **11.75%** |
@@ -324,7 +368,7 @@ Aligned transfer improved mean precision by **3.63 percentage points** over same
 ### Layer-by-layer primary results
 
 | Target | Layer | Same-index P@10% | Aligned P@10% | Random-map mean P@10% |
-| --- | --- | ---: | ---: | ---: |
+|---|---|---:|---:|---:|
 | seed 123 | `layer2.1.bn1` | 7.69% | **15.38%** | 10.45% |
 | seed 123 | `layer3.1.bn1` | 7.69% | **11.54%** | 10.25% |
 | seed 123 | `layer4.1.bn1` | **15.38%** | 11.54% | 10.17% |
@@ -366,7 +410,7 @@ flowchart TD
 
 **Not established:** consistent superiority over random mappings; semantic equivalence of matched channels; causal understanding of whole-network function; useful weight/parameter transfer; automatic architecture construction; adding knowledge while retaining capabilities; or reduced training data/compute requirements.
 
-## Current Research Status
+## Current Research Status (updated 16 October 2026)
 
 **Current stage: model observation, intervention analysis, robust activation alignment, and preliminary importance transfer.**
 
@@ -391,20 +435,51 @@ flowchart TD
 - Reduced data or compute requirements relative to conventional baselines.
 - Recursive improvement of the model-construction process.
 
-## Next Milestone: MetaTransfer v0.2 — Confirmatory Replication
+## Current Milestone: MetaTransfer v0.3 — Independent-Seed Replication
 
-**Status: Recommended next experiment; not yet completed.**
+**Status as of 16 October 2026: two new target models trained and verified; transfer evaluator created and syntax-checked; local audit and full evaluation still pending.**
 
-The next objective is to test whether the v0.1 advantage survives additional independently trained target models and evaluation data that were not used for checkpoint selection or method development.
+Two new CIFAR-adapted ResNet-18 targets were trained on the same frozen 45,000/5,000 split with independent initialization/shuffle seeds:
 
-1. Train at least five additional independently initialized target checkpoints under a fixed, recorded protocol.
-2. Reserve a genuinely independent evaluation set before tuning the method; do not treat the previously reused validation partition as pristine.
-3. Compare activation-aligned transfer with same-index transfer, random mappings, and simple activation/weight-norm ranking baselines.
-4. Record per-example intervention effects where feasible, enabling paired uncertainty analysis rather than relying only on aggregate channel labels.
-5. Predefine a practical success criterion and analyze outcomes at the model/seed level, reporting negative results as well as positive ones.
-6. Keep all v0.1 reports and caches immutable; write v0.2 artifacts into a new versioned directory.
+| Target seed | Best validation accuracy | Training status |
+| --- | ---: | --- |
+| 2027 | 91.74% | Complete; 20 epochs recorded |
+| 31415 | 92.32% | Complete; 20 epochs recorded |
 
-**Success criterion:** aligned transfer should beat both same-index and random controls consistently across independent targets, with uncertainty analysis supporting a robust advantage. This would still validate a narrow transfer method—not general model construction or reduced pretraining.
+![New v0.3 target model validation results](assets/metatransfer_v03_new_seed_training.png)
+
+These accuracy values are training-quality checks only. They do not establish any benefit from MetaTransfer.
+
+### Evaluation procedure
+
+1. Run the evaluator's audit-only mode and inspect the output before running the full experiment.
+2. Freeze source seed-42 importance rankings and the transfer method; compute fresh activation mappings for each new target.
+3. Evaluate target channel effects on CIFAR-10.1 v6 images, without using external labels to derive the channel mapping.
+4. Compare activation-aligned transfer against same-index and random-mapping controls.
+5. Summarize results at the **target-seed level**, with layer-wise detail treated as nested/dependent evidence.
+6. Preserve the v0.1/v0.2 reports and all prior checkpoints. Write only to the new versioned output directory.
+
+The v0.3 script is available separately as `run_metatransfer_v03.py`. It has only been syntax-checked in the preparation environment; it has not been verified against the local project runtime. Run `--audit-only` first. Do not interpret a successful audit as a successful transfer result.
+
+### Decision rule
+
+A favorable result would be evidence for a narrow importance-transfer method only. It would not demonstrate model reconstruction, general understanding, or reduced pretraining. If the independent-seed results are mixed or negative, record that and move the central research effort toward direct parameter intervention and reconstruction rather than repeatedly tuning channel matching.
+
+## The Core Objective: Understand and Construct Models
+
+The project must not confuse its current channel-alignment experiments with the ultimate goal. Brahma MetaCore is intended to study relationships between a model's architecture, parameters, weights, internal activations, training data, and observable capabilities, then use the resulting map to make and test model-construction decisions.
+
+The intended progression is:
+
+1. **Observe:** capture architecture, tensor shapes, parameter values/statistics, activations, and baseline behavior.
+2. **Intervene:** modify selected weights, activations, or components and measure effects on defined tasks.
+3. **Explain and predict:** build testable hypotheses about which changes cause which outcomes; verify predictions on held-out inputs and independent model seeds.
+4. **Construct:** generate a target architecture and/or new or transformed weights from the model map.
+5. **Measure capability retention:** compare source and target behavior on a predeclared evaluation suite.
+6. **Add information:** incorporate new data or tasks and measure new capability, old-capability retention, and regressions.
+7. **Measure efficiency:** compare data, compute, time, and final capability against conventional baselines.
+
+A model map may include useful information about architecture and parameter effects, but it should not be assumed to contain enough information to reconstruct all learned knowledge. That is a central experimental question.
 
 ## Longer-Term Research Phases
 
@@ -476,10 +551,40 @@ The project uses PyTorch and torchvision. Machine-readable reports and cached ex
 
 ## Guiding Principle
 
-**Map a model. Learn from its structure and behavior. Use that information to construct or modify another model. Measure whether the result is better.**
+**Understand how model structure and parameters produce measured capabilities. Use that evidence to construct or modify another model, then test whether capability is retained and training cost is reduced.**
 
 Brahma MetaCore investigates whether information extracted from existing AI models can become a practical resource for building and modifying future models—not merely analyzing or training them.
 
 The main evidence figures in `assets/` are generated from the machine-readable v0.6 and MetaTransfer v0.1 reports. They visualize the measured correlation and precision values in this document; they are not independent experiments.
 
 The ambition is broad; the evidence must be earned one experiment at a time.
+
+
+## Reproducible Status Ledger (16 October 2026)
+
+| Artifact / result | Status | Interpretation |
+| --- | --- | --- |
+| `reports/milestone2_v06/channel_alignment.json` | Completed | Alignment evidence |
+| `reports/milestone2_v07/validation_report.json` | Completed | Robustness diagnostics; not a population-level significance test |
+| `reports/metatransfer_v01/transfer_report.json` | Completed | Initial importance-transfer signal |
+| `reports/metatransfer_v02_external_run2` and `.md` | Completed | External-image directional rule failed |
+| `checkpoints/metatransfer_v03_seed2027` | Completed | New target model, seed 2027 |
+| `checkpoints/metatransfer_v03_seed31415` | Completed | New target model, seed 31415 |
+| `src/experiments/run_metatransfer_v03.py` | Prepared; local audit pending | Syntax-checked only; do not claim evaluation success yet |
+
+### Next local commands
+
+From the project root in the activated Python environment:
+
+```powershell
+python -m py_compile src\experiments\run_metatransfer_v03.py
+python -m src.experiments.run_metatransfer_v03 --audit-only
+```
+
+Inspect the complete audit output. If it reports errors, stop and fix those before the full evaluation. If the audit passes, run:
+
+```powershell
+python -m src.experiments.run_metatransfer_v03
+```
+
+Do not overwrite previous report directories or checkpoints. After the result is generated, update this README with the measured output—including negative results—before deciding the next experiment.
