@@ -664,3 +664,10 @@ Runtime edges record actual tensor operands and operator outputs for a particula
 ### Validation status
 
 The project owner reported the v0.1 prototype and 10 tests successful on Windows/CUDA. The v0.2 changes require the new local tests before they are considered validated.
+
+
+### v0.3 — Computational path query engine (implementation added; local validation pending)
+
+The new src/metaobserver/path_tracer.py queries the runtime ATen graph in both directions. Given an input tensor and logits output tensor, it returns downstream reachability, the full upstream dependency closure (including parameters), nodes on at least one input-to-output route, and one shortest representative route. It does not enumerate every possible route.
+
+The query accepts input token-position and output-logit coordinates as endpoint metadata. The recorded graph remains tensor/operator-level; coordinate selectors do not imply scalar neuron-level decomposition. The path report records module-wise operator counts and parameter dependencies. Tests are in tests/test_path_tracer.py; see docs/NCIFM_PATH_QUERY.md.
