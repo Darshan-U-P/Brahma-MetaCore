@@ -238,6 +238,29 @@ def trace_tensor_coordinate(
             "module_scope": op.get("module_scope"),
         }
 
+    def finish_group(dependency_group: dict[str, Any]) -> dict[str, Any]:
+        if dependency_group["dependency_count"] > max_fan_in:
+            return {
+                "status": "fan_in_limit",
+                "tensor_id": tensor_id,
+                "coordinate": list(coord),
+                "dependencies": [],
+                "dependency_groups": [],
+                "operator": op_name,
+                "module_scope": op.get("module_scope"),
+                "required_fan_in": dependency_group["dependency_count"],
+                "max_fan_in": max_fan_in,
+            }
+        return {
+            "status": "expanded",
+            "tensor_id": tensor_id,
+            "coordinate": list(coord),
+            "dependencies": [],
+            "dependency_groups": [dependency_group],
+            "operator": op_name,
+            "module_scope": op.get("module_scope"),
+        }
+
     if output_index != 0:
         return {
             "status": "unsupported_output_index",
@@ -437,16 +460,27 @@ def trace_tensor_coordinate(
                 "required_fan_in": count + 2, "max_fan_in": max_fan_in,
             }
         prefix = coord[:-len(normalized_shape)]
-        dependencies = [
-            dependency(input_index, item, "normalization_statistic_or_value")
-            for item in _cartesian_coordinates(prefix, normalized_shape)
-        ]
+        input_node = operands[input_index]
+        group = {
+            "tensor_id": input_node["id"],
+            "coordinate_prefix": list(prefix),
+            "varying_axes": list(range(len(prefix), len(input_node["shape"]))),
+            "axis_sizes": normalized_shape,
+            "relation": "normalization_statistic_or_value",
+            "operand_index": input_index,
+            "dependency_count": count,
+        }
+        result = finish_group(group)
+        if result["status"] != "expanded":
+            return result
         affine_coordinate = coord[-len(normalized_shape):]
+        dependencies = []
         if weight_index in operands:
             dependencies.append(dependency(weight_index, affine_coordinate, "layer_norm_scale"))
         if bias_index in operands:
             dependencies.append(dependency(bias_index, affine_coordinate, "layer_norm_shift"))
-        return finish(dependencies)
+        result["dependencies"] = dependencies
+        return result
 
     # Softmax output at one position depends on the entire normalization axis.
     if op_name.startswith(("aten::softmax.", "aten::_softmax.")):
@@ -461,12 +495,18 @@ def trace_tensor_coordinate(
                 "module_scope": op.get("module_scope"),
             }
         axis = axis % len(input_shape)
-        dependencies = []
-        for value in range(input_shape[axis]):
-            mapped = list(coord)
-            mapped[axis] = value
-            dependencies.append(dependency(input_index, mapped, "softmax_normalizer"))
-        return finish(dependencies)
+        prefix = list(coord)
+        prefix[axis] = 0
+        group = {
+            "tensor_id": operands[input_index]["id"],
+            "coordinate_prefix": prefix,
+            "varying_axes": [axis],
+            "axis_sizes": [input_shape[axis]],
+            "relation": "softmax_normalizer",
+            "operand_index": input_index,
+            "dependency_count": input_shape[axis],
+        }
+        return finish_group(group)
 
     # Layout-only coordinate transformations.
     if op_name.startswith("aten::transpose."):
@@ -606,13 +646,19 @@ def trace_tensor_coordinate(
                 else:
                     base.append(0)
         axis_sizes = [input_shape[axis] for axis in axes]
-        dependencies = []
-        for reduced_values in itertools.product(*(range(size) for size in axis_sizes)):
-            mapped = list(base)
-            for axis, value in zip(axes, reduced_values):
-                mapped[axis] = value
-            dependencies.append(dependency(input_index, mapped, "reduction_input"))
-        return finish(dependencies)
+        count = 1
+        for size in axis_sizes:
+            count *= size
+        group = {
+            "tensor_id": operands[input_index]["id"],
+            "coordinate_prefix": base,
+            "varying_axes": axes,
+            "axis_sizes": axis_sizes,
+            "relation": "reduction_input",
+            "operand_index": input_index,
+            "dependency_count": count,
+        }
+        return finish_group(group)
 
     return {
         "status": "unsupported_operator",
@@ -653,6 +699,7 @@ def trace_coordinate_graph(
 
     coordinate_nodes: dict[str, dict[str, Any]] = {}
     coordinate_edges: list[dict[str, Any]] = []
+    dependency_groups: list[dict[str, Any]] = []
     frontier: list[dict[str, Any]] = []
     queue = deque([(target_tensor_id, target_coord, 0)])
     truncated = False
@@ -713,6 +760,35 @@ def trace_coordinate_graph(
                 "module_scope": expansion.get("module_scope"),
                 "required_fan_in": expansion.get("required_fan_in"),
             })
+        for group in expansion.get("dependency_groups", []):
+            group_id = f"group:{len(dependency_groups)}"
+            group_record = {
+                "id": group_id,
+                "target_coordinate_node_id": coordinate_id,
+                **group,
+                "operator": expansion.get("operator"),
+                "module_scope": expansion.get("module_scope"),
+            }
+            dependency_groups.append(group_record)
+            axes = group["varying_axes"]
+            sizes = group["axis_sizes"]
+            prefix = tuple(group["coordinate_prefix"])
+            for varying in itertools.product(*(range(size) for size in sizes)):
+                mapped = list(prefix)
+                for axis, value in zip(axes, varying):
+                    mapped[axis] = value
+                source_coordinate = tuple(mapped)
+                source_id = _coordinate_node_id(group["tensor_id"], source_coordinate)
+                if len(coordinate_nodes) + len(queue) >= max_nodes:
+                    truncated = True
+                    frontier.append({
+                        "coordinate_node_id": source_id,
+                        "tensor_id": group["tensor_id"],
+                        "coordinate": list(source_coordinate),
+                        "reason": "max_nodes",
+                    })
+                    continue
+                queue.append((group["tensor_id"], source_coordinate, depth + 1))
         for item in expansion.get("dependencies", []):
             source_coordinate = tuple(item["coordinate"])
             source_id = _coordinate_node_id(item["tensor_id"], source_coordinate)
@@ -724,7 +800,8 @@ def trace_coordinate_graph(
                     "coordinate": list(source_coordinate),
                     "reason": "max_edges",
                 })
-                continue
+                queue.clear()
+                break
             coordinate_edges.append({
                 "source": source_id,
                 "target": coordinate_id,
@@ -794,6 +871,7 @@ def trace_coordinate_graph(
         "summary": {
             "coordinate_node_count": len(coordinate_nodes),
             "coordinate_edge_count": len(coordinate_edges),
+            "dependency_group_count": len(dependency_groups),
             "input_coordinate_count": len(input_coordinates),
             "parameter_coordinate_count": len(parameter_coordinates),
             "frontier_count": len(frontier),
@@ -810,6 +888,7 @@ def trace_coordinate_graph(
         "frontier": frontier,
         "nodes": list(coordinate_nodes.values()),
         "edges": coordinate_edges,
+        "dependency_groups": dependency_groups,
         "interpretation_limits": [
             "This is a coordinate-level dependency expansion for one captured execution.",
             "Each supported rule describes mathematical operand dependency, not contribution magnitude.",
