@@ -461,10 +461,14 @@ def trace_tensor_coordinate(
             }
         prefix = coord[:-len(normalized_shape)]
         input_node = operands[input_index]
+        group_base = list(coord)
+        varying_axes = list(range(len(prefix), len(input_node["shape"])))
+        for axis in varying_axes:
+            group_base[axis] = 0
         group = {
             "tensor_id": input_node["id"],
-            "coordinate_prefix": list(prefix),
-            "varying_axes": list(range(len(prefix), len(input_node["shape"]))),
+            "coordinate_prefix": group_base,
+            "varying_axes": varying_axes,
             "axis_sizes": normalized_shape,
             "relation": "normalization_statistic_or_value",
             "operand_index": input_index,
