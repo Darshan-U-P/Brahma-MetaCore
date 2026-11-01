@@ -87,5 +87,5 @@ The tracer now records:
 
 Operator timings measure the coordinate-rule expansion call, not total time spent enumerating groups, scheduling coordinates, serializing JSON, or executing the model. Use them to identify candidates for deeper profiling, not as a complete end-to-end performance breakdown.
 
-A captured PyTorch regression test uses two clone branches from the same input and a two-node scheduling budget. The add output queues one clone branch and reaches the limit on the other; expanding the queued clone must still discover the exact source coordinate. This keeps the test on the real runtime-graph capture path while avoiding the deeper fan-in of linear layers.
+A captured PyTorch regression test uses two clone branches from the same input and a three-node scheduling budget. The target model-output alias and its producer add coordinate consume the first two slots; the add then queues one clone branch in the third slot and reaches the limit on the other. Expanding the already-queued clone must still discover the exact source coordinate. This keeps the test on the real runtime-graph capture path while avoiding the deeper fan-in of linear layers.
 
