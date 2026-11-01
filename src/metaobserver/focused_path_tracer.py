@@ -119,6 +119,7 @@ def trace_focused_coordinate_path(
     queue = deque([(target_tensor_id, target, 0)])
     scheduled = {target_id}
     candidates_examined = 0
+    coordinate_nodes_processed = 0
     resource_limited = False
     unsupported_seen = False
     found = source_id == target_id
@@ -157,6 +158,7 @@ def trace_focused_coordinate_path(
 
     while queue and not found and not resource_limited:
         current_tensor_id, current_coordinate, depth = queue.popleft()
+        coordinate_nodes_processed += 1
         current_id = _coordinate_node_id(current_tensor_id, current_coordinate)
         tensor_node = nodes[current_tensor_id]
         coordinate_nodes[current_id] = {
@@ -437,7 +439,7 @@ def trace_focused_coordinate_path(
         "frontier": frontier,
         "summary": {
             "coordinate_nodes_examined": len(coordinate_nodes),
-            "coordinate_nodes_processed": len(coordinate_nodes),
+            "coordinate_nodes_processed": coordinate_nodes_processed,
             "coordinate_nodes_scheduled": len(scheduled),
             "queue_remaining_at_stop": len(queue),
             "source_reachable_tensor_count": len(source_reachable_tensors),
