@@ -132,6 +132,7 @@ def trace_focused_coordinate_path(
             })
             continue
         if depth >= max_depth:
+            resource_limited = True
             add_frontier({
                 "tensor_id": current_tensor_id,
                 "coordinate": list(current_coordinate),
@@ -153,8 +154,7 @@ def trace_focused_coordinate_path(
                 "module_scope": expansion.get("module_scope"),
                 "required_fan_in": expansion.get("required_fan_in"),
             })
-            if status != "value_required":
-                unsupported_seen = True
+            unsupported_seen = True
 
         for group in expansion.get("dependency_groups", []):
             group_tensor_id = group["tensor_id"]
@@ -303,7 +303,14 @@ def trace_focused_coordinate_path(
             })
             cursor = link["next"]
 
-    search_complete = not queue and not resource_limited and not unsupported_seen
+    terminal_frontier_reasons = {"model_input", "parameter", "external_tensor"}
+    unresolved_frontier = any(
+        item.get("reason") not in terminal_frontier_reasons for item in frontier
+    )
+    search_complete = (
+        not queue and not resource_limited and not unsupported_seen
+        and not unresolved_frontier
+    )
     if found:
         status = "path_found"
     elif resource_limited:
