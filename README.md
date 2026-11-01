@@ -198,7 +198,6 @@ Key target-model results:
 | Outgoing weight norm | 0.524 | 0.35 |
 | Activation mean absolute value | 0.479 | 0.35 |
 | Activation standard deviation | 0.380 | 0.45 |
-
 The Random Forest showed a positive cross-model rank correlation, but incoming weight norm had a slightly higher Spearman correlation and activation standard deviation had higher top-20 precision. Results differed by layer. This is preliminary evidence that some source-model statistics relate to target-model importance, not proof of a reliable general predictor.
 
 ### 7. MetaAnalyzer v0.6 — Activation-based channel alignment
@@ -398,7 +397,6 @@ flowchart TD
 ## MetaTransfer v0.3 — Independent-seed replication (16 October 2026)
 
 **Status: Completed.** The audit passed, the full evaluator completed in 1,468 seconds (approximately 24.5 minutes), and both JSON and Markdown reports were created at `reports/metatransfer_v03_new_seeds/`.
-
 ### Protocol
 
 - **Frozen source:** seed-42 importance rankings from v0.1.
@@ -597,7 +595,6 @@ The ambition is broad; the evidence must be earned one experiment at a time.
 
 
 ## Checkout Verification (1 November 2026)
-
 The project root contains `src/`, `tests/`, `configs/`, `data/`, `checkpoints/`, `reports/`, and `assets/`, plus the top-level `requirements.txt` and this README. The automated test suite currently consists of `tests/test_metaobserver.py` (7 tests), covering the CIFAR-10 ResNet-18, model inspection, activation capture, hook cleanup, and JSON serialization.
 
 | Check | Result | Evidence |
@@ -634,7 +631,7 @@ The construction results below are summaries of saved reports generated on 18 Oc
 
 ## Neural Connectivity and Information-Flow Mapper (NCIFM)
 
-**Milestone status: v0.2 implementation added; local validation pending.**
+**Milestone status: v0.3 implementation, local validation, and hosted CI complete.**
 
 ### v0.1 — GPT-2 observation baseline
 
@@ -663,11 +660,24 @@ Runtime edges record actual tensor operands and operator outputs for a particula
 
 ### Validation status
 
-The project owner reported the v0.1 prototype and 10 tests successful on Windows/CUDA. The v0.2 changes require the new local tests before they are considered validated.
+The project owner reported the v0.1 prototype and 10 tests successful on Windows/CUDA. v0.2 then passed 12 local tests and retained exact prompt-logit parity (maximum absolute difference 0.0). v0.3 passed all 15 tests locally; the updated GitHub Actions CPU workflow also passed compilation and all 15 tests.
 
 
-### v0.3 — Computational path query engine (implementation added; local validation pending)
+### v0.3 — Computational path query engine (implementation and validation complete)
 
 The new src/metaobserver/path_tracer.py queries the runtime ATen graph in both directions. Given an input tensor and logits output tensor, it returns downstream reachability, the full upstream dependency closure (including parameters), nodes on at least one input-to-output route, and one shortest representative route. It does not enumerate every possible route.
 
 The query accepts input token-position and output-logit coordinates as endpoint metadata. The recorded graph remains tensor/operator-level; coordinate selectors do not imply scalar neuron-level decomposition. The path report records module-wise operator counts and parameter dependencies. Tests are in tests/test_path_tracer.py; see docs/NCIFM_PATH_QUERY.md.
+
+### v0.3 validation result
+
+The project owner ran the query against the saved GPT-2 Small prompt-prefill trace for `What is an apple?`. The selected input coordinate was sequence position 3 (`Ġapple`); the selected output was the top-ranked token at sequence position 4, newline, with recorded probability 0.35327.
+
+- Path reachable: yes; runtime graph is acyclic.
+- Source-to-target route subgraph: 1,078 nodes and 1,149 edges.
+- Complete target-upstream dependency closure: 1,271 nodes, including 548 operators and 148 parameter dependencies.
+- Shortest representative route: 70 nodes.
+- Local validation: Python compilation passed; 15 tests passed in 3.66 seconds.
+- Hosted CI: CPU dependency installation, NCIFM compilation and all 15 tests passed.
+
+The 70-node shortest route is one representative route, not the complete computational flow or an attribution ranking. Endpoint coordinates annotate positions in whole tensors; they do not isolate token-to-neuron or neuron-to-logit scalar dependencies. The full upstream graph includes attention and MLP operations as well as residual-stream paths. Computational dependency does not establish semantic meaning or causal contribution.
