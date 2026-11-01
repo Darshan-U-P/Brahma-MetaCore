@@ -93,3 +93,16 @@ The report identifies whether the selected input token coordinate was reached in
 5. Recursive traces report explicit resource limits and unsupported frontiers.
 6. The existing v0.1-v0.3 tests continue to pass.
 7. No claim of a complete GPT-2 scalar graph is made until unsupported and fused operators have validated rules.
+
+
+## v0.4.1 — Compact high-fan-in groups
+
+The first GPT-2 run exposed a scale problem in the explicit scalar-edge representation. A selected logit passes through the tied output embedding projection and final LayerNorm. Expanding 768 LayerNorm output coordinates independently into all 768 coordinates in each normalized slice attempts to materialize 589,824 input edges for that slice family before continuing upstream.
+
+The v0.4.1 implementation represents LayerNorm, softmax and reduction fan-in as compact `dependency_groups`. Each group stores the source tensor, fixed coordinate prefix, varying axes, axis sizes, operand index, relation and dependency count. The recursive walk still visits each member coordinate (subject to the configured limits), but the JSON graph no longer needs one edge record per member-to-output pair.
+
+The explicit edge cap now stops edge expansion immediately and emits a bounded frontier record rather than appending one record for every remaining dependency. This prevents the frontier list from growing far beyond the configured edge limit.
+
+The first GPT-2 coordinate result was inconclusive: the 50,000-edge cap was reached before input token position 3 was reached. A null reachability result is not evidence of no dependency. The compact-group change is intended to make the next trace more tractable; it does not guarantee a complete GPT-2 scalar graph.
+
+A new small-model test validates compact LayerNorm group metadata and confirms that all normalized input coordinates are reached recursively. Run the full tests and repeat the GPT-2 coordinate experiment before treating v0.4.1 as validated.
