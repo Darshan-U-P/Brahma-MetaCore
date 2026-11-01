@@ -67,6 +67,12 @@ def trace_focused_coordinate_path(
     coordinate_nodes: dict[str, dict[str, Any]] = {}
     toward_target: dict[str, dict[str, Any]] = {}
     parameter_groups: list[dict[str, Any]] = []
+    # Many output coordinates (notably LayerNorm and softmax) share the exact
+    # same activation dependency slice. Expand each identical slice once.
+    # Its first target coordinate is already connected to the requested target,
+    # so a source found in that slice still has a valid route to the target.
+    seen_activation_groups: set[tuple[Any, ...]] = set()
+    activation_groups_deduplicated = 0
     frontier: list[dict[str, Any]] = []
     queue = deque([(target_tensor_id, target, 0)])
     scheduled = {target_id}
@@ -185,6 +191,24 @@ def trace_focused_coordinate_path(
                     break
                 if parameter_policy == "compact":
                     continue
+
+            # Deduplicate identical activation fan-in groups. This is especially
+            # important for normalization: every output feature at one sequence
+            # position depends on the same normalized input slice.
+            group_key = (
+                group_tensor_id,
+                tuple(group["coordinate_prefix"]),
+                tuple(group["varying_axes"]),
+                tuple(group["axis_sizes"]),
+                relation,
+                expansion.get("operator"),
+                expansion.get("module_scope"),
+            )
+            if group_node.get("kind") != "parameter":
+                if group_key in seen_activation_groups:
+                    activation_groups_deduplicated += 1
+                    continue
+                seen_activation_groups.add(group_key)
 
             axes = group["varying_axes"]
             sizes = group["axis_sizes"]
@@ -343,6 +367,8 @@ def trace_focused_coordinate_path(
             "candidate_dependencies_examined": candidates_examined,
             "path_length": len(path),
             "parameter_groups_retained": len(parameter_groups),
+            "activation_dependency_groups_deduplicated": activation_groups_deduplicated,
+            "activation_dependency_groups_expanded": len(seen_activation_groups),
             "unresolved_frontier_count": len(frontier),
             "resource_limit_reached": resource_limited,
             "unsupported_operator_or_rule_seen": unsupported_seen,
@@ -357,5 +383,6 @@ def trace_focused_coordinate_path(
             "A found path may coexist with unresolved alternative branches; inspect search_complete and frontier.",
             "A path_not_found result is conclusive only when search_complete is true.",
             "Compact parameter groups identify participating parameter coordinates without enumerating every scalar by default.",
+            "Identical activation dependency groups are expanded once; their shared scalar dependencies remain connected to the first encountered target coordinate.",
         ],
     }
