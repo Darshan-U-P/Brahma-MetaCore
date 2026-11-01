@@ -88,6 +88,58 @@ class LinearOnly(nn.Module):
         return self.projection(values)
 
 
+def test_activation_source_coordinate_matches_compact_linear_group_without_enumeration():
+    graph, input_id = capture(LinearOnly(), torch.randn(1, 4))
+    result = trace_focused_coordinate_path(
+        graph,
+        input_id, [0, 2],
+        "model_output:logits", [0, 0, 1],
+        max_depth=8, max_nodes=100, max_candidates=100,
+    )
+
+    assert result["result"]["status"] == "path_found"
+    assert result["path"][0]["source_coordinate_node_id"].startswith(
+        "coord::" + input_id + "::["
+    )
+    assert result["summary"]["candidate_dependencies_examined"] == 0
+    assert result["summary"]["coordinate_nodes_scheduled"] >= 1
+    assert result["summary"]["coordinate_nodes_processed"] >= 1
+
+
+def test_source_reachability_prunes_unrelated_model_input_branch():
+    class TwoInputResidual(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.projection = nn.Linear(4, 3)
+
+        def forward(self, values, side):
+            return self.projection(values) + side
+
+    model = TwoInputResidual().eval()
+    values = torch.randn(1, 4)
+    side = torch.randn(1, 3)
+    recorder = RuntimeTensorGraph(model, max_ops=2000)
+    source_id = recorder.register_input("values", values)
+    side_id = recorder.register_input("side", side)
+    with torch.inference_mode(), recorder:
+        output = model(values, side)
+        recorder.add_output("logits", output)
+    graph = recorder.to_dict()
+
+    result = trace_focused_coordinate_path(
+        graph,
+        source_id, [0, 2],
+        "model_output:logits", [0, 1],
+        max_depth=16, max_nodes=100, max_candidates=100,
+    )
+
+    assert result["result"]["status"] == "path_found"
+    assert side_id not in {
+        node["tensor_id"] for node in result["nodes"]
+    }
+    assert result["summary"]["source_reachable_tensor_count"] >= 2
+
+
 def test_parameter_coordinate_can_be_requested_as_source():
     graph, _ = capture(LinearOnly(), torch.randn(1, 4))
     weight = next(
