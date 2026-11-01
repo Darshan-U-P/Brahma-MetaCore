@@ -203,30 +203,68 @@ def test_same_coordinate_source_and_target_returns_empty_path():
     assert result["path"] == []
 
 
-def test_node_budget_drains_already_scheduled_coordinates_before_stopping():
-    class TwoBranchProjection(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.left = nn.Linear(4, 3)
-            self.right = nn.Linear(4, 3)
+def test_node_budget_drains_already_scheduled_coordinates_before_stopping(monkeypatch):
+    # Keep this regression focused on queue semantics rather than on the
+    # implementation details or fan-in of a particular PyTorch operator.
+    source_id = "input:source"
+    queued_id = "activation:queued"
+    omitted_id = "activation:omitted"
+    target_id = "model_output:logits"
+    graph = {
+        "graph_type": "runtime_tensor_dependency_graph",
+        "nodes": [
+            {"id": source_id, "kind": "model_input", "label": "source", "shape": [1]},
+            {"id": queued_id, "kind": "activation", "label": "queued", "shape": [1]},
+            {"id": omitted_id, "kind": "activation", "label": "omitted", "shape": [1]},
+            {"id": target_id, "kind": "model_output", "label": "logits", "shape": [1]},
+            {"id": "op:source_to_queued", "kind": "operator"},
+            {"id": "op:queued_to_target", "kind": "operator"},
+        ],
+        "edges": [
+            {"source": source_id, "target": "op:source_to_queued", "relation": "operand"},
+            {"source": "op:source_to_queued", "target": queued_id, "relation": "produces"},
+            {"source": queued_id, "target": "op:queued_to_target", "relation": "operand"},
+            {"source": omitted_id, "target": "op:queued_to_target", "relation": "operand"},
+            {"source": "op:queued_to_target", "target": target_id, "relation": "produces"},
+        ],
+    }
 
-        def forward(self, values):
-            return self.left(values) + self.right(values)
+    def fake_trace_tensor_coordinate(_graph, tensor_id, coordinate, **_kwargs):
+        if tensor_id == target_id:
+            return {
+                "status": "expanded",
+                "operator": "test::two_branch",
+                "dependencies": [
+                    {"tensor_id": queued_id, "coordinate": [0], "relation": "test_branch"},
+                    {"tensor_id": omitted_id, "coordinate": [0], "relation": "test_branch"},
+                ],
+            }
+        if tensor_id == queued_id:
+            return {
+                "status": "expanded",
+                "operator": "test::source_link",
+                "dependencies": [
+                    {"tensor_id": source_id, "coordinate": [0], "relation": "test_source"},
+                ],
+            }
+        raise AssertionError(f"Unexpected tensor expansion: {tensor_id} {coordinate}")
 
-    graph, input_id = capture(TwoBranchProjection(), torch.randn(1, 4))
+    monkeypatch.setattr(
+        "src.metaobserver.focused_path_tracer.trace_tensor_coordinate",
+        fake_trace_tensor_coordinate,
+    )
     result = trace_focused_coordinate_path(
         graph,
-        input_id, [0, 2],
-        "model_output:logits", [0, 1],
-        max_depth=16, max_nodes=2, max_candidates=100,
+        source_id, [0],
+        target_id, [0],
+        max_depth=8, max_nodes=2, max_candidates=10,
     )
 
-    # The target's first branch is already queued when the second branch hits
-    # the scheduling limit. The tracer must still process that queued branch.
-    assert result["result"]["path_found"] is True
+    # The target queues one branch and hits max_nodes on the other. The
+    # queued branch must still be expanded and allowed to reach the source.
+    assert result["result"]["path_found"] is True, result
     assert result["result"]["status"] == "path_found"
     assert result["summary"]["resource_limit_reached"] is True
-    assert result["summary"]["coordinate_nodes_processed"] >= 2
+    assert result["summary"]["coordinate_nodes_processed"] == 2
     assert result["summary"]["queue_remaining_at_stop"] == 0
     assert result["result"]["search_complete"] is False
-
