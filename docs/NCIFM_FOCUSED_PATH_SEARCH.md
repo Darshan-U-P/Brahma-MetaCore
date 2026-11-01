@@ -1,6 +1,6 @@
 # NCIFM v0.5 — Focused Coordinate Path Search
 
-**Status:** v0.5.3 is locally validated by the owner (32 regression tests passed) and hosted CI passed. v0.5.4 adds source-guided scheduling; validation is pending.
+**Status:** v0.5.3 is locally validated by the owner (32 regression tests passed) and hosted CI passed. v0.5.4 source-guided scheduling is implemented; hosted CI passed module compilation and 35 observer tests (3.85 seconds). Owner-side local validation and the GPT-2 experiment rerun remain pending.
 
 ## Objective
 
