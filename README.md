@@ -720,7 +720,16 @@ The follow-up implementation on `feature/neural-connectivity-mapper-v01`:
 - Aggregates omitted group members into a bounded node-limit frontier record instead of emitting one record per duplicate candidate.
 - Adds a regression test for repeated LayerNorm groups feeding a Linear projection and updates linear/addmm coordinate tests for compact groups.
 
-**Owner validation:** Windows compilation passed and **22 tests passed in 3.77 seconds**. The GPT-2 coordinate query against the saved v0.4 capture produced 20,000 coordinate nodes (the configured node limit), 19,213 explicit edges (below the 50,000 edge limit), 2,306 dependency groups, 4,626 parameter coordinates and 10,767 frontier records. The trace was truncated; it reached zero input coordinates and reported null focus reachability. Of the frontier records, 6,141 were counted as unsupported or unresolved by the tracer's summary. The remaining bottleneck is now the coordinate-node budget, not the explicit edge budget. A null reachability result is inconclusive; it does not show that input token position 3 is disconnected from the selected logit.
+**Owner validation:** Windows compilation passed and **22 tests passed in 3.77 seconds**. The GPT-2 coordinate query against the saved v0.4 capture produced 20,000 coordinate nodes (the configured node limit), 19,213 explicit edges (below the 50,000 edge limit), 2,306 dependency groups, 4,626 parameter coordinates and 10,767 frontier records. It reached zero input coordinates and reported null focus reachability.
 
-**Next diagnostic:** summarize frontier reasons, operator names and module scopes from `apple_coordinate_dependencies_v042.json`. Identify whether the remaining blockers are unsupported operators or broad but supported fan-in before changing limits or adding more coordinate rules. No GPT-2 token-to-logit scalar path or complete scalar graph is claimed yet.
+**Frontier diagnostic:** the owner inspected all frontier categories:
+- `max_nodes`: 5,370 entries.
+- `parameter`: 4,626 terminal entries.
+- `fan_in_limit`: 771 entries, all from `aten::addmm.default`; 768 are in `transformer.h.11.mlp.c_proj` and 3 in `transformer.h.10.mlp.c_proj`.
+- No `unsupported_operator` frontier was reported in this diagnostic.
 
+The `addmm` entries each require 6,145 scalar operand coordinates: 3,072 input-activation coordinates, 3,072 weight coordinates and one bias/addend coordinate. The configured `max_fan_in=4096` rejects this valid but dense operation before its upstream dependencies can be traversed. This is a fan-in policy limit, not evidence of a missing ATen rule.
+
+**Engineering conclusion:** simply raising `max_fan_in` and `max_nodes` for the full backward closure risks expanding millions of parameter coordinates, because dense projection weights are legitimate terminal dependencies but are irrelevant to answering the narrower question "does this selected input token have a path to this selected logit?" The next implementation should add a focused input-to-output reachability/path query that prioritizes activation/index dependencies, keeps parameter dependencies as compact terminal groups, and stops when the requested source coordinate is reached. The existing full-dependency mode should remain available for users who explicitly request the larger closure.
+
+The GPT-2 result remains incomplete and null reachability remains inconclusive. No token-to-logit scalar path or complete GPT-2 scalar graph is claimed yet.
