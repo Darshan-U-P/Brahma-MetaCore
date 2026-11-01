@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+import time
 from collections import deque
 from typing import Any
 
@@ -102,7 +103,9 @@ def trace_focused_coordinate_path(
     _validate_coordinate(nodes[source_tensor_id], source)
     _validate_coordinate(nodes[target_tensor_id], target)
     values = tensor_values or {}
+    reachability_started = time.perf_counter()
     source_reachable_tensors = _source_reachable_tensor_ids(graph, source_tensor_id)
+    reachability_seconds = time.perf_counter() - reachability_started
 
     source_id = _coordinate_node_id(source_tensor_id, source)
     target_id = _coordinate_node_id(target_tensor_id, target)
@@ -117,10 +120,14 @@ def trace_focused_coordinate_path(
     activation_groups_deduplicated = 0
     frontier: list[dict[str, Any]] = []
     queue = deque([(target_tensor_id, target, 0)])
+    queue_peak_size = 1
     scheduled = {target_id}
     candidates_examined = 0
     coordinate_nodes_processed = 0
+    max_depth_processed = 0
     resource_limited = False
+    operator_profile: dict[str, dict[str, float | int]] = {}
+    search_started = time.perf_counter()
     unsupported_seen = False
     found = source_id == target_id
 
@@ -156,9 +163,11 @@ def trace_focused_coordinate_path(
             record["dependency_count"] = group["dependency_count"]
         parameter_groups.append(record)
 
-    while queue and not found and not resource_limited:
+    while queue and not found:
         current_tensor_id, current_coordinate, depth = queue.popleft()
         coordinate_nodes_processed += 1
+        max_depth_processed = max(max_depth_processed, depth)
+        limit_this_expansion = False
         current_id = _coordinate_node_id(current_tensor_id, current_coordinate)
         tensor_node = nodes[current_tensor_id]
         coordinate_nodes[current_id] = {
@@ -190,10 +199,18 @@ def trace_focused_coordinate_path(
             })
             continue
 
+        expansion_started = time.perf_counter()
         expansion = trace_tensor_coordinate(
             graph, current_tensor_id, current_coordinate,
             tensor_values=values, max_fan_in=max_candidates,
         )
+        expansion_seconds = time.perf_counter() - expansion_started
+        operator_name = expansion.get("operator") or "<unknown>"
+        operator_stats = operator_profile.setdefault(
+            operator_name, {"coordinates_expanded": 0, "elapsed_seconds": 0.0}
+        )
+        operator_stats["coordinates_expanded"] += 1
+        operator_stats["elapsed_seconds"] += expansion_seconds
         status = expansion.get("status", "unknown")
         if status != "expanded":
             add_frontier({
@@ -290,6 +307,7 @@ def trace_focused_coordinate_path(
                 candidates_examined += 1
                 if candidates_examined > max_candidates:
                     resource_limited = True
+                    limit_this_expansion = True
                     add_frontier({
                         "reason": "max_candidates",
                         "tensor_id": group_tensor_id,
@@ -320,6 +338,7 @@ def trace_focused_coordinate_path(
                 if dependency_id not in scheduled:
                     if len(scheduled) >= max_nodes:
                         resource_limited = True
+                        limit_this_expansion = True
                         add_frontier({
                             "reason": "max_nodes", "tensor_id": group_tensor_id,
                             "coordinate": list(dependency_coordinate),
@@ -327,10 +346,13 @@ def trace_focused_coordinate_path(
                         break
                     scheduled.add(dependency_id)
                     queue.append((group_tensor_id, dependency_coordinate, depth + 1))
-            if found or resource_limited:
+                    queue_peak_size = max(queue_peak_size, len(queue))
+            if found or limit_this_expansion:
                 break
-        if found or resource_limited:
+        if found:
             break
+        if limit_this_expansion:
+            continue
 
         for dependency in expansion.get("dependencies", []):
             dep_tensor_id = dependency["tensor_id"]
@@ -340,6 +362,7 @@ def trace_focused_coordinate_path(
             candidates_examined += 1
             if candidates_examined > max_candidates:
                 resource_limited = True
+                limit_this_expansion = True
                 add_frontier({"reason": "max_candidates", "tensor_id": dep_tensor_id})
                 break
             if dep_node.get("kind") == "parameter":
@@ -372,6 +395,7 @@ def trace_focused_coordinate_path(
             if dep_id not in scheduled:
                 if len(scheduled) >= max_nodes:
                     resource_limited = True
+                    limit_this_expansion = True
                     add_frontier({
                         "reason": "max_nodes", "tensor_id": dep_tensor_id,
                         "coordinate": list(dep_coordinate),
@@ -379,9 +403,13 @@ def trace_focused_coordinate_path(
                     break
                 scheduled.add(dep_id)
                 queue.append((dep_tensor_id, dep_coordinate, depth + 1))
-        if found or resource_limited:
+                queue_peak_size = max(queue_peak_size, len(queue))
+        if found:
             break
+        if limit_this_expansion:
+            continue
 
+    search_seconds = time.perf_counter() - search_started
     path: list[dict[str, Any]] = []
     if found:
         cursor = source_id
@@ -438,11 +466,27 @@ def trace_focused_coordinate_path(
         "parameter_dependency_groups": parameter_groups,
         "frontier": frontier,
         "summary": {
-            "coordinate_nodes_examined": len(coordinate_nodes),
+            "coordinate_nodes_examined": coordinate_nodes_processed,
+            "coordinate_nodes_recorded": len(coordinate_nodes),
             "coordinate_nodes_processed": coordinate_nodes_processed,
             "coordinate_nodes_scheduled": len(scheduled),
             "queue_remaining_at_stop": len(queue),
+            "queue_peak_size": queue_peak_size,
+            "max_depth_processed": max_depth_processed,
             "source_reachable_tensor_count": len(source_reachable_tensors),
+            "reachability_seconds": round(reachability_seconds, 6),
+            "search_seconds": round(search_seconds, 6),
+            "operator_profile": {
+                name: {
+                    "coordinates_expanded": stats["coordinates_expanded"],
+                    "elapsed_seconds": round(stats["elapsed_seconds"], 6),
+                }
+                for name, stats in sorted(
+                    operator_profile.items(),
+                    key=lambda item: item[1]["elapsed_seconds"],
+                    reverse=True,
+                )
+            },
             "candidate_dependencies_examined": candidates_examined,
             "path_length": len(path),
             "parameter_groups_retained": len(parameter_groups),
