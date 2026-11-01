@@ -47,6 +47,37 @@ def test_focused_path_finds_known_token_to_logit_dependency():
     assert result["summary"]["parameter_groups_retained"] > 0
 
 
+class EmbeddingLayerNormProjection(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedding = nn.Embedding(16, 4)
+        self.normalization = nn.LayerNorm(4)
+        self.projection = nn.Linear(4, 3)
+
+    def forward(self, input_ids):
+        return self.projection(self.normalization(self.embedding(input_ids)))
+
+
+def test_shared_layer_norm_activation_group_is_expanded_once():
+    ids = torch.tensor([[3, 9]])
+    graph, input_id = capture(EmbeddingLayerNormProjection(), ids)
+    result = trace_focused_coordinate_path(
+        graph,
+        input_id, [0, 0],
+        "model_output:logits", [0, 0],
+        tensor_values={input_id: [[3, 9]]},
+        max_depth=32, max_nodes=2000, max_candidates=100,
+    )
+
+    assert result["result"]["status"] == "path_found"
+    assert result["result"]["path_found"] is True
+    assert any(edge["operator"].startswith("aten::layer_norm.")
+               for edge in result["path"])
+    assert result["summary"]["activation_dependency_groups_deduplicated"] >= 1
+    assert result["summary"]["activation_dependency_groups_expanded"] >= 1
+    assert result["summary"]["candidate_dependencies_examined"] < 100
+
+
 class LinearOnly(nn.Module):
     def __init__(self):
         super().__init__()
