@@ -733,3 +733,16 @@ The `addmm` entries each require 6,145 scalar operand coordinates: 3,072 input-a
 **Engineering conclusion:** simply raising `max_fan_in` and `max_nodes` for the full backward closure risks expanding millions of parameter coordinates, because dense projection weights are legitimate terminal dependencies but are irrelevant to answering the narrower question "does this selected input token have a path to this selected logit?" The next implementation should add a focused input-to-output reachability/path query that prioritizes activation/index dependencies, keeps parameter dependencies as compact terminal groups, and stops when the requested source coordinate is reached. The existing full-dependency mode should remain available for users who explicitly request the larger closure.
 
 The GPT-2 result remains incomplete and null reachability remains inconclusive. No token-to-logit scalar path or complete GPT-2 scalar graph is claimed yet.
+
+
+### v0.5 — Focused coordinate path search (implementation committed; owner validation pending)
+
+The v0.5 feature adds src/metaobserver/focused_path_tracer.py and src/experiments/trace_focused_coordinate_path.py. It searches backward from one selected output coordinate for one exact source coordinate, then reconstructs a representative path in source-to-target order. It reuses the existing conservative operation-local coordinate rules rather than duplicating the ATen rule set.
+
+By default, activation and index dependencies are explored while parameter dependencies are retained as compact groups. A requested parameter coordinate can still be matched against a compact group. Node, candidate, depth and frontier limits are explicit. Results distinguish path_found, path_not_found, inconclusive_limit and inconclusive_unsupported; a found path can coexist with unresolved alternative branches, so search_complete and frontier must also be inspected.
+
+The v0.4 trace_coordinate_graph() full dependency-closure API remains unchanged. The focused path mode is an additional query mode, not a replacement.
+
+Synthetic regression tests cover an embedding/mean/linear token-to-logit path, a parameter-coordinate source, unsupported operations, node-budget exhaustion, invalid coordinates and identical endpoints. GitHub Actions now compiles the new module and CLI and runs the focused tests alongside the existing observer and full-closure tests.
+
+**Validation boundary:** implementation and test files have been committed to the feature branch, but no local owner test result or GPT-2 v0.5 result is claimed yet. The owner should pull the branch, run the full regression command, and then run the focused GPT-2 apple query documented in docs/NCIFM_FOCUSED_PATH_SEARCH.md. The previous v0.4.2 GPT-2 null reachability result remains inconclusive, not evidence of disconnection.
