@@ -41,8 +41,8 @@ def test_focused_path_finds_known_token_to_logit_dependency():
     assert result["result"]["status"] == "path_found"
     assert result["result"]["path_found"] is True
     assert result["path"]
-    assert result["path"][0]["source_coordinate_node_id"].startswith(input_id + "[")
-    assert result["path"][-1]["target_coordinate_node_id"].startswith("model_output:logits[")
+    assert result["path"][0]["source_coordinate_node_id"].startswith("coord::" + input_id + "::[")
+    assert result["path"][-1]["target_coordinate_node_id"].startswith("coord::model_output:logits::[")
     assert any(edge["relation"] == "lookup_index" for edge in result["path"])
     assert result["summary"]["parameter_groups_retained"] > 0
 
@@ -69,7 +69,7 @@ def test_parameter_coordinate_can_be_requested_as_source():
         max_depth=8, max_nodes=100, max_candidates=100,
     )
     assert result["result"]["status"] == "path_found"
-    assert result["path"][0]["source_coordinate_node_id"].startswith(weight["id"] + "[")
+    assert result["path"][0]["source_coordinate_node_id"].startswith("coord::" + weight["id"] + "::[")
 
 
 class UnsupportedSin(nn.Module):
