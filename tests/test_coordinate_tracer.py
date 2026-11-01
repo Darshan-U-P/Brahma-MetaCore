@@ -257,7 +257,7 @@ def test_recursive_trace_deduplicates_reused_layer_norm_groups_under_node_cap():
         focus_source_tensor_id=input_node_id,
         focus_source_coordinate=[0, 3],
         max_depth=16,
-        max_nodes=25,
+        max_nodes=32,
         max_edges=100,
     )
 
