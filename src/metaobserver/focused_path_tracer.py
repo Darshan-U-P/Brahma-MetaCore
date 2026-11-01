@@ -1,6 +1,7 @@
 """Focused source-to-target coordinate dependency search for NCIFM."""
 from __future__ import annotations
 
+import heapq
 import itertools
 import time
 from collections import deque
@@ -29,15 +30,14 @@ def _group_contains(group: dict[str, Any], coordinate: tuple[int, ...]) -> bool:
     return all(coordinate[i] == prefix[i] for i in range(len(prefix)) if i not in varying)
 
 
-def _source_reachable_tensor_ids(
+def _source_tensor_distances(
     graph: dict[str, Any], source_tensor_id: str
-) -> set[str]:
-    """Return tensors reachable from source through captured operator operands.
+) -> dict[str, int]:
+    """Return shortest tensor-level distances downstream from the source.
 
-    This is a conservative tensor-level filter: it can discard a branch only
-    when the captured runtime graph contains no directed path from the requested
-    source tensor to that branch's tensor. Coordinate-level rules still decide
-    whether an exact scalar dependency exists.
+    Distances are a search-ordering heuristic only. They never prune a
+    coordinate dependency: all source-reachable branches remain eligible, and
+    the coordinate-level operator rules remain authoritative.
     """
     nodes = _node_index(graph)
     if source_tensor_id not in nodes:
@@ -54,20 +54,20 @@ def _source_reachable_tensor_ids(
 
     downstream: dict[str, set[str]] = {}
     for operator_id, inputs in operator_inputs.items():
+        outputs = operator_outputs.get(operator_id, [])
         for input_tensor_id in inputs:
-            downstream.setdefault(input_tensor_id, set()).update(
-                operator_outputs.get(operator_id, [])
-            )
+            downstream.setdefault(input_tensor_id, set()).update(outputs)
 
-    reachable = {source_tensor_id}
+    distances = {source_tensor_id: 0}
     pending = deque([source_tensor_id])
     while pending:
         current = pending.popleft()
+        next_distance = distances[current] + 1
         for output_tensor_id in downstream.get(current, ()):
-            if output_tensor_id not in reachable:
-                reachable.add(output_tensor_id)
+            if output_tensor_id not in distances:
+                distances[output_tensor_id] = next_distance
                 pending.append(output_tensor_id)
-    return reachable
+    return distances
 
 
 def trace_focused_coordinate_path(
@@ -82,6 +82,7 @@ def trace_focused_coordinate_path(
     max_candidates: int = 100_000,
     max_frontier: int = 10_000,
     parameter_policy: str = "compact",
+    search_strategy: str = "source_guided",
 ) -> dict[str, Any]:
     """Find a dependency path from one exact source coordinate to a target.
 
@@ -92,6 +93,10 @@ def trace_focused_coordinate_path(
         raise CoordinateTraceError("Depth must be non-negative and all other limits positive.")
     if parameter_policy not in {"compact", "expand"}:
         raise CoordinateTraceError("parameter_policy must be 'compact' or 'expand'.")
+    if search_strategy not in {"source_guided", "breadth_first"}:
+        raise CoordinateTraceError(
+            "search_strategy must be source_guided or breadth_first."
+        )
 
     nodes = _node_index(graph)
     if source_tensor_id not in nodes:
@@ -104,7 +109,8 @@ def trace_focused_coordinate_path(
     _validate_coordinate(nodes[target_tensor_id], target)
     values = tensor_values or {}
     reachability_started = time.perf_counter()
-    source_reachable_tensors = _source_reachable_tensor_ids(graph, source_tensor_id)
+    source_tensor_distances = _source_tensor_distances(graph, source_tensor_id)
+    source_reachable_tensors = set(source_tensor_distances)
     reachability_seconds = time.perf_counter() - reachability_started
 
     source_id = _coordinate_node_id(source_tensor_id, source)
@@ -119,7 +125,23 @@ def trace_focused_coordinate_path(
     seen_activation_groups: set[tuple[Any, ...]] = set()
     activation_groups_deduplicated = 0
     frontier: list[dict[str, Any]] = []
-    queue = deque([(target_tensor_id, target, 0)])
+    queue: list[tuple[int, int, int, int, str, tuple[int, ...]]] = []
+    queue_sequence = itertools.count()
+
+    def enqueue_coordinate(
+        tensor_id: str, coordinate: tuple[int, ...], depth: int
+    ) -> None:
+        distance = source_tensor_distances.get(tensor_id, 1_000_000_000)
+        if search_strategy == "source_guided":
+            primary, secondary = distance, depth
+        else:
+            primary, secondary = depth, distance
+        heapq.heappush(
+            queue,
+            (primary, secondary, next(queue_sequence), depth, tensor_id, coordinate),
+        )
+
+    enqueue_coordinate(target_tensor_id, target, 0)
     queue_peak_size = 1
     scheduled = {target_id}
     candidates_examined = 0
@@ -164,7 +186,7 @@ def trace_focused_coordinate_path(
         parameter_groups.append(record)
 
     while queue and not found:
-        current_tensor_id, current_coordinate, depth = queue.popleft()
+        _, _, _, depth, current_tensor_id, current_coordinate = heapq.heappop(queue)
         coordinate_nodes_processed += 1
         max_depth_processed = max(max_depth_processed, depth)
         limit_this_expansion = False
@@ -345,7 +367,7 @@ def trace_focused_coordinate_path(
                         })
                         break
                     scheduled.add(dependency_id)
-                    queue.append((group_tensor_id, dependency_coordinate, depth + 1))
+                    enqueue_coordinate(group_tensor_id, dependency_coordinate, depth + 1)
                     queue_peak_size = max(queue_peak_size, len(queue))
             if found or limit_this_expansion:
                 break
@@ -427,7 +449,7 @@ def trace_focused_coordinate_path(
                     })
                     break
                 scheduled.add(dep_id)
-                queue.append((dep_tensor_id, dep_coordinate, depth + 1))
+                enqueue_coordinate(dep_tensor_id, dep_coordinate, depth + 1)
                 queue_peak_size = max(queue_peak_size, len(queue))
         if found:
             break
@@ -499,6 +521,8 @@ def trace_focused_coordinate_path(
             "queue_peak_size": queue_peak_size,
             "max_depth_processed": max_depth_processed,
             "source_reachable_tensor_count": len(source_reachable_tensors),
+            "target_tensor_distance": source_tensor_distances.get(target_tensor_id),
+            "search_strategy": search_strategy,
             "reachability_seconds": round(reachability_seconds, 6),
             "search_seconds": round(search_seconds, 6),
             "operator_profile": {
