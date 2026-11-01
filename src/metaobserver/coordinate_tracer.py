@@ -412,7 +412,7 @@ def trace_tensor_coordinate(
 
     # Layer normalization: an output feature depends on the whole normalized
     # slice, plus the matching affine scale and shift when present.
-    if op_name.startswith("aten::layer_norm."):
+    if op_name.startswith(("aten::layer_norm.", "aten::native_layer_norm.")):
         input_index = _operand_index(op, "input", 0)
         weight_index = _operand_index(op, "weight", 2)
         bias_index = _operand_index(op, "bias", 3)
@@ -449,7 +449,7 @@ def trace_tensor_coordinate(
         return finish(dependencies)
 
     # Softmax output at one position depends on the entire normalization axis.
-    if op_name.startswith("aten::softmax."):
+    if op_name.startswith(("aten::softmax.", "aten::_softmax.")):
         input_index = _operand_index(op, "self", 0)
         input_shape = operands[input_index]["shape"]
         axis = _integer(_argument(op, "dim"))
@@ -580,7 +580,7 @@ def trace_tensor_coordinate(
         input_shape = operands[input_index]["shape"]
         padded = [1] * (len(coord) - len(input_shape)) + input_shape
         mapped = [0 if size == 1 else value for size, value in zip(padded, coord)]
-        return finish([dependency(input_index, mapped[-len(input_shape):], "expand_reindex")])
+        return finish([dependency(input_index, mapped[-len(input_shape):] if input_shape else (), "expand_reindex")])
 
     # Reductions such as mean/sum depend on all elements in reduced dimensions.
     if op_name.startswith(("aten::mean.", "aten::sum.")):
@@ -750,15 +750,16 @@ def trace_coordinate_graph(
             raise CoordinateTraceError(f"Unknown focus source tensor {focus_source_tensor_id!r}.")
         _validate_coordinate(nodes[focus_source_tensor_id], focused)
         focused_source_id = _coordinate_node_id(focus_source_tensor_id, focused)
-        visited = set()
-        pending = deque([focused_source_id])
-        while pending:
-            current_id = pending.popleft()
-            if current_id in visited:
-                continue
-            visited.add(current_id)
-            pending.extend(adjacency.get(current_id, []))
-        focus_reachable = target_coordinate_id in visited
+        if focused_source_id in coordinate_nodes:
+            visited = set()
+            pending = deque([focused_source_id])
+            while pending:
+                current_id = pending.popleft()
+                if current_id in visited:
+                    continue
+                visited.add(current_id)
+                pending.extend(adjacency.get(current_id, []))
+            focus_reachable = target_coordinate_id in visited
 
     input_coordinates = [
         item for item in coordinate_nodes.values()
@@ -772,6 +773,11 @@ def trace_coordinate_graph(
         item["reason"] not in {"model_input", "parameter", "external_tensor", "max_depth"}
         for item in frontier
     )
+    terminal_reasons = {"model_input", "parameter", "external_tensor"}
+    unresolved_reasons = [
+        item["reason"] for item in frontier
+        if item["reason"] not in terminal_reasons
+    ]
     return {
         "graph_type": "coordinate_dependency_graph",
         "schema_version": "0.1.0",
@@ -797,7 +803,7 @@ def trace_coordinate_graph(
             "max_nodes": max_nodes,
             "max_edges": max_edges,
             "max_fan_in": max_fan_in,
-            "complete": not truncated and not frontier,
+            "complete": not truncated and not unresolved_reasons,
         },
         "input_coordinates": input_coordinates,
         "parameter_coordinates": parameter_coordinates,
