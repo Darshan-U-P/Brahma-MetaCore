@@ -631,7 +631,7 @@ The construction results below are summaries of saved reports generated on 18 Oc
 
 ## Neural Connectivity and Information-Flow Mapper (NCIFM)
 
-**Milestone status: v0.3 implementation, local validation, and hosted CI complete.**
+**Milestone status: v0.4.1 passed the owner's local 21-test suite; GPT-2 coordinate tracing remains incomplete. v0.4.2 traversal improvements are implemented and awaiting validation.**
 
 ### v0.1 — GPT-2 observation baseline
 
@@ -703,8 +703,22 @@ Unknown/fused operations and depth, fan-in, node or edge limits are explicit fro
 The v0.4 coordinate graph describes mathematical operand dependencies for one recorded execution. It does not yet establish contribution magnitude, semantic function, causal necessity, or a complete neuron/attention-head map of GPT-2.
 
 
-### v0.4.1 — Compact high-fan-in dependency groups (implementation added; validation pending)
+### v0.4.1 — Compact high-fan-in dependency groups (local unit tests passed; GPT-2 trace incomplete)
 
-The first owner-run GPT-2 coordinate query selected the final-position newline logit (token ID 198, probability 0.35327) and input token position 3 (`Ġapple`). It reached the 50,000-edge cap while expanding the final LayerNorm: one output feature depends on the full 768-feature normalization slice, and tracing all 768 output features naïvely creates 768 × 768 scalar dependency edges. The run produced 5,494 coordinate nodes, 50,000 edges, 884 parameter coordinates, zero reached input coordinates, and a null focus-reachability result. This is **inconclusive**, not evidence of no input dependency.
+The first GPT-2 coordinate query selected the final-position newline logit (token ID 198, probability 0.35327) and input token position 3 (`Ġapple`). The query reached the 50,000-edge cap while traversing the final LayerNorm. v0.4.1 introduced compact dependency groups for LayerNorm, softmax and reductions and added a small-model LayerNorm reachability test.
 
-The v0.4.1 implementation replaces LayerNorm, softmax and reduction fan-in expansion with compact dependency-group records, while recursively visiting the member coordinates. These compact groups also participate in source-to-target reachability checks without being serialized as one edge per coordinate. It stops the edge-expansion loop immediately after the explicit edge cap instead of emitting an unbounded duplicate frontier. A new LayerNorm group test verifies that all four input coordinates are reached in a small model. Local and hosted validation of this follow-up remains pending.
+**Owner validation:** Windows compilation passed and **21 tests passed in 3.85 seconds**. The GPT-2 coordinate rerun produced 13,911 coordinate nodes, 50,000 explicit edges, 768 dependency groups, 2,304 parameter coordinates, 577,545 frontier records, zero reached input coordinates, and null focus reachability. The graph was truncated and incomplete. The null result is not evidence that input position 3 is disconnected from the selected logit.
+
+Code inspection identified repeated scheduling of identical source coordinates from shared LayerNorm groups. The same normalized source slice was enqueued once for every output feature, consuming the node budget with duplicate pending coordinates and producing oversized frontier output.
+
+### v0.4.2 — Unique coordinate scheduling and compact linear fan-in (implementation added; validation pending)
+
+The follow-up implementation on `feature/neural-connectivity-mapper-v01`:
+- Tracks scheduled coordinate IDs so each tensor coordinate is queued at most once.
+- Deduplicates repeated group traversal for identical source tensor slices, while retaining separate logical group records for distinct target coordinates.
+- Represents `aten::linear`, `aten::matmul`, `aten::bmm`, and `aten::addmm` fan-in as compact dependency groups; bias and addend dependencies remain explicit.
+- Aggregates omitted group members into a bounded node-limit frontier record instead of emitting one record per duplicate candidate.
+- Adds a regression test for repeated LayerNorm groups feeding a Linear projection and updates linear/addmm coordinate tests for compact groups.
+
+**Validation is pending.** The v0.4.2 code has not yet been run locally or in hosted CI. The next check is to compile, run the NCIFM test subset, and repeat the coordinate query against the existing v0.4 GPT-2 capture. No GPT-2 token-to-logit path or full scalar graph is claimed yet.
+
