@@ -15,6 +15,7 @@ on:
       - "src/metaobserver/**"
       - "src/experiments/run_neural_connectivity_gpt2.py"
       - "src/experiments/trace_computational_path.py"
+      - "src/experiments/trace_coordinate_dependencies.py"
       - "tests/**"
       - ".github/workflows/neural-connectivity-ci.yml"
   workflow_dispatch:
