@@ -91,6 +91,36 @@ def test_deduplicated_shared_group_preserves_a_valid_representative_path():
     assert result["summary"]["activation_dependency_groups_deduplicated"] >= 1
 
 
+def test_source_guided_search_prefers_shorter_source_route_under_node_budget():
+    class LongAndShortBranches(nn.Module):
+        def forward(self, values):
+            long_branch = values.clone().clone().clone()
+            short_branch = values.clone()
+            return long_branch + short_branch
+
+    graph, input_id = capture(LongAndShortBranches(), torch.randn(1, 4))
+    guided = trace_focused_coordinate_path(
+        graph,
+        input_id, [0, 2],
+        "model_output:logits", [0, 2],
+        max_depth=16, max_nodes=3, max_candidates=10,
+        search_strategy="source_guided",
+    )
+    breadth_first = trace_focused_coordinate_path(
+        graph,
+        input_id, [0, 2],
+        "model_output:logits", [0, 2],
+        max_depth=16, max_nodes=3, max_candidates=10,
+        search_strategy="breadth_first",
+    )
+
+    assert guided["result"]["path_found"] is True
+    assert guided["result"]["status"] == "path_found"
+    assert guided["summary"]["resource_limit_reached"] is True
+    assert breadth_first["result"]["path_found"] is False
+    assert breadth_first["result"]["status"] == "inconclusive_limit"
+
+
 def test_source_guided_and_breadth_first_strategies_both_find_linear_path():
     graph, input_id = capture(LinearOnly(), torch.randn(1, 4))
     for strategy in ("source_guided", "breadth_first"):
