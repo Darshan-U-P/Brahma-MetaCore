@@ -174,3 +174,43 @@ def test_coordinate_shape_validation_rejects_invalid_rank_and_index():
         trace_tensor_coordinate(graph, output_id, [0, 1])
     with pytest.raises(CoordinateTraceError):
         trace_tensor_coordinate(graph, output_id, [0, 2, 0])
+
+
+class NormalizeOnly(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.norm = nn.LayerNorm(4)
+
+    def forward(self, values):
+        return self.norm(values)
+
+
+def test_layer_norm_uses_compact_dependency_group_and_expands_all_input_coordinates():
+    values = torch.randn(1, 4)
+    graph, input_node_id = capture_graph(NormalizeOnly(), values)
+    output_id = output_source(graph)
+
+    immediate = trace_tensor_coordinate(graph, output_id, [0, 2])
+    assert immediate["status"] == "expanded"
+    assert len(immediate["dependency_groups"]) == 1
+    group = immediate["dependency_groups"][0]
+    assert group["tensor_id"] == input_node_id
+    assert group["coordinate_prefix"] == [0, 0]
+    assert group["varying_axes"] == [1]
+    assert group["axis_sizes"] == [4]
+    assert group["dependency_count"] == 4
+
+    recursive = trace_coordinate_graph(
+        graph,
+        "model_output:output",
+        [0, 2],
+        focus_source_tensor_id=input_node_id,
+        focus_source_coordinate=[0, 3],
+        max_depth=8,
+        max_nodes=100,
+        max_edges=100,
+    )
+    assert recursive["query"]["focus_source_reaches_target"] is True
+    assert len(recursive["input_coordinates"]) == 4
+    assert recursive["summary"]["dependency_group_count"] >= 1
+    assert recursive["summary"]["truncated"] is False
