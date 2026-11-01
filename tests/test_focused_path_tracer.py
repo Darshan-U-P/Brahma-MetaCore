@@ -93,7 +93,7 @@ def test_activation_source_coordinate_matches_compact_linear_group_without_enume
     result = trace_focused_coordinate_path(
         graph,
         input_id, [0, 2],
-        "model_output:logits", [0, 0, 1],
+        "model_output:logits", [0, 1],
         max_depth=8, max_nodes=100, max_candidates=100,
     )
 
@@ -101,7 +101,8 @@ def test_activation_source_coordinate_matches_compact_linear_group_without_enume
     assert result["path"][0]["source_coordinate_node_id"].startswith(
         "coord::" + input_id + "::["
     )
-    assert result["summary"]["candidate_dependencies_examined"] == 0
+    assert result["summary"]["candidate_dependencies_examined"] == 1
+    assert result["summary"]["activation_dependency_groups_expanded"] == 0
     assert result["summary"]["coordinate_nodes_scheduled"] >= 1
     assert result["summary"]["coordinate_nodes_processed"] >= 1
 
