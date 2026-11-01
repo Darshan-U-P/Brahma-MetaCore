@@ -115,6 +115,14 @@ The hardware and software details describe the current experimental environment;
 
 ## Experimental Progress
 
+### NCIFM — Neural Connectivity and Information Flow Mapper
+
+**Current feature branch:** focused coordinate-path search v0.5.4 (source-guided scheduling).
+
+NCIFM captures runtime tensor/operator dependencies and traces coordinate-level paths from selected model inputs to outputs. The v0.5.4 focused search adds source-distance-guided scheduling: it prioritizes reachable dependency tensors and groups that are structurally closer to the requested source, while retaining breadth-first ordering as a comparison mode. This changes search order, not the supported dependency rules or the interpretation of a path. It does not prune reachable scalar coordinates.
+
+Hosted CI passed compilation and **35 observer regression tests** for v0.5.4. Owner-side local validation and the GPT-2 apple experiment rerun are still pending; no GPT-2 path-discovery improvement is claimed yet. Focused search returns one representative path rather than a complete scalar dependency graph. See [NCIFM focused path search](docs/NCIFM_FOCUSED_PATH_SEARCH.md) for API, semantics, validation commands and interpretation limits.
+
 ### 1. MetaObserver v0.1 — Neural-network inspection
 
 **Status: Implemented and tested**
@@ -198,7 +206,6 @@ Key target-model results:
 | Outgoing weight norm | 0.524 | 0.35 |
 | Activation mean absolute value | 0.479 | 0.35 |
 | Activation standard deviation | 0.380 | 0.45 |
-
 The Random Forest showed a positive cross-model rank correlation, but incoming weight norm had a slightly higher Spearman correlation and activation standard deviation had higher top-20 precision. Results differed by layer. This is preliminary evidence that some source-model statistics relate to target-model importance, not proof of a reliable general predictor.
 
 ### 7. MetaAnalyzer v0.6 — Activation-based channel alignment
@@ -398,7 +405,6 @@ flowchart TD
 ## MetaTransfer v0.3 — Independent-seed replication (16 October 2026)
 
 **Status: Completed.** The audit passed, the full evaluator completed in 1,468 seconds (approximately 24.5 minutes), and both JSON and Markdown reports were created at `reports/metatransfer_v03_new_seeds/`.
-
 ### Protocol
 
 - **Frozen source:** seed-42 importance rankings from v0.1.
@@ -597,7 +603,6 @@ The ambition is broad; the evidence must be earned one experiment at a time.
 
 
 ## Checkout Verification (1 November 2026)
-
 The project root contains `src/`, `tests/`, `configs/`, `data/`, `checkpoints/`, `reports/`, and `assets/`, plus the top-level `requirements.txt` and this README. The automated test suite currently consists of `tests/test_metaobserver.py` (7 tests), covering the CIFAR-10 ResNet-18, model inspection, activation capture, hook cleanup, and JSON serialization.
 
 | Check | Result | Evidence |
@@ -630,3 +635,131 @@ The construction results below are summaries of saved reports generated on 18 Oc
 | `reports/metacore_construction_pilot_v04_crossed_stage4/pilot_report.json` | Completed | Mean +2.35 pp final validation difference in 6 crossed pairs |
 | `reports/metacore_construction_pilot_v05_external_eval/pilot_report.json` | Completed | Mean +2.89 pp CIFAR-10.1 v6 difference in 6 pairs; external dataset has prior project use |
 | `python -m pytest -q` | Blocked in this sandbox | Selected runtime lacks pytest; test assertions were not executed |
+
+
+## Neural Connectivity and Information-Flow Mapper (NCIFM)
+
+**Milestone status: v0.4.1 passed the owner's local 21-test suite; GPT-2 coordinate tracing remains incomplete. v0.4.2 traversal improvements are implemented and awaiting validation.**
+
+### v0.1 — GPT-2 observation baseline
+
+The first local GPT-2 run was reported successful on CUDA:
+- Model: GPT2LMHeadModel, 124,439,808 parameters.
+- Module inventory: 163 modules.
+- Prompt: "What is an apple?", tokenized into 5 tokens.
+- Prompt attention: 12 layers, each shaped [1, 12, 5, 5].
+- Hidden-state stages: 13.
+- Greedy generation: 8 tokens.
+
+Inspection of the supplied JSON identified a capture defect: module-hook records had been overwritten by autoregressive generation, so final module activations represented a 12-token context while prompt attention represented the original 5-token prompt.
+
+### v0.2 — Pass-specific traces and operator-level tensor graph
+
+Added implementation:
+- src/metaobserver/computational_graph.py records ATen tensor operands and outputs. Operator nodes include active module-scope annotations; edges record operands and produced tensors.
+- src/metaobserver/neural_connectivity.py separates prompt prefill and each generation pass, records per-pass module outputs, hidden states and attention, captures an ATen operator/tensor graph for each pass by default, documents the logical Q/K/V slices from GPT-2's fused projection, and checks instrumented prompt logits against a direct forward pass.
+- runtime_computational_graphs.json stores the runtime operator/tensor graph separately from model_graph.json.
+- trace_report.json stores pass-wise execution records and the prompt logit parity check.
+- Tests cover operator capture, parameter/input dependencies, pass-specific sequence lengths, parity, truncation and hook cleanup.
+
+### Interpretation boundary
+
+Runtime edges record actual tensor operands and operator outputs for a particular forward pass. They are computational dependencies, not semantic labels or causal attribution. The current graph does not yet decompose every dense operation into scalar neuron-to-neuron contributions. Causal claims require controlled interventions and controls.
+
+### Validation status
+
+The project owner reported the v0.1 prototype and 10 tests successful on Windows/CUDA. v0.2 then passed 12 local tests and retained exact prompt-logit parity (maximum absolute difference 0.0). v0.3 passed all 15 tests locally; the updated GitHub Actions CPU workflow also passed compilation and all 15 tests.
+
+
+### v0.3 — Computational path query engine (implementation and validation complete)
+
+The new src/metaobserver/path_tracer.py queries the runtime ATen graph in both directions. Given an input tensor and logits output tensor, it returns downstream reachability, the full upstream dependency closure (including parameters), nodes on at least one input-to-output route, and one shortest representative route. It does not enumerate every possible route.
+
+The query accepts input token-position and output-logit coordinates as endpoint metadata. The recorded graph remains tensor/operator-level; coordinate selectors do not imply scalar neuron-level decomposition. The path report records module-wise operator counts and parameter dependencies. Tests are in tests/test_path_tracer.py; see docs/NCIFM_PATH_QUERY.md.
+
+### v0.3 validation result
+
+The project owner ran the query against the saved GPT-2 Small prompt-prefill trace for `What is an apple?`. The selected input coordinate was sequence position 3 (`Ġapple`); the selected output was the top-ranked token at sequence position 4, newline, with recorded probability 0.35327.
+
+- Path reachable: yes; runtime graph is acyclic.
+- Source-to-target route subgraph: 1,078 nodes and 1,149 edges.
+- Complete target-upstream dependency closure: 1,271 nodes, including 548 operators and 148 parameter dependencies.
+- Shortest representative route: 70 nodes.
+- Local validation: Python compilation passed; 15 tests passed in 3.66 seconds.
+- Hosted CI: CPU dependency installation, NCIFM compilation and all 15 tests passed.
+
+The 70-node shortest route is one representative route, not the complete computational flow or an attribution ranking. Endpoint coordinates annotate positions in whole tensors; they do not isolate token-to-neuron or neuron-to-logit scalar dependencies. The full upstream graph includes attention and MLP operations as well as residual-stream paths. Computational dependency does not establish semantic meaning or causal contribution.
+
+### v0.4 — Coordinate-resolved dependency tracing (implementation and local test validation complete)
+
+The v0.4 implementation adds `src/metaobserver/coordinate_tracer.py` and `src/experiments/trace_coordinate_dependencies.py`. Runtime operator nodes now retain JSON-safe ATen argument metadata, including named tensor-operand references and scalar arguments. The runtime graph schema version is `0.3.0`; tensor contents are not copied into this metadata.
+
+The coordinate tracer resolves one selected output scalar into its immediate scalar operand coordinates and can recursively build a bounded backward coordinate-dependency graph. Implemented rules cover:
+- Embedding lookup and selected embedding-table row resolution from captured input IDs.
+- Elementwise unary operations and broadcast binary operations.
+- Linear, `addmm`, matrix multiplication and batched matrix multiplication.
+- Layer normalization / native layer normalization and softmax.
+- Transpose, permute, view/reshape, slice, select, squeeze, unsqueeze and expand.
+- Sum and mean reductions.
+
+Unknown/fused operations and depth, fan-in, node or edge limits are explicit frontiers. A partial trace is not evidence that omitted dependencies do not exist. Embedding index edges are labelled as lookup/routing dependencies, not numeric additive contributions.
+
+**Compatibility:** v0.2 GPT-2 runtime graph files predate operator-argument capture. Generate a new GPT-2 trace before using the v0.4 coordinate CLI; do not reuse `apple_demo_v02/runtime_computational_graphs.json` for coordinate tracing. See `docs/NCIFM_COORDINATE_TRACING.md`.
+
+**Validation:** The project owner reported successful Windows compilation and **20 tests passed in 3.81 seconds**. The fresh GPT-2 Small trace ran on `cuda:0`, captured 569 operators / 743 tensor nodes / 1,394 edges for each of prompt-prefill and generation-step-1, and retained exact prompt-logit parity (maximum absolute difference 0.0). Hosted GitHub Actions run [41305564246](https://github.com/Darshan-U-P/Brahma-MetaCore/actions/runs/41305564246) also passed compilation and 20 tests.
+
+The v0.4 coordinate graph describes mathematical operand dependencies for one recorded execution. It does not yet establish contribution magnitude, semantic function, causal necessity, or a complete neuron/attention-head map of GPT-2.
+
+
+### v0.4.1 — Compact high-fan-in dependency groups (local unit tests passed; GPT-2 trace incomplete)
+
+The first GPT-2 coordinate query selected the final-position newline logit (token ID 198, probability 0.35327) and input token position 3 (`Ġapple`). The query reached the 50,000-edge cap while traversing the final LayerNorm. v0.4.1 introduced compact dependency groups for LayerNorm, softmax and reductions and added a small-model LayerNorm reachability test.
+
+**Owner validation:** Windows compilation passed and **21 tests passed in 3.85 seconds**. The GPT-2 coordinate rerun produced 13,911 coordinate nodes, 50,000 explicit edges, 768 dependency groups, 2,304 parameter coordinates, 577,545 frontier records, zero reached input coordinates, and null focus reachability. The graph was truncated and incomplete. The null result is not evidence that input position 3 is disconnected from the selected logit.
+
+Code inspection identified repeated scheduling of identical source coordinates from shared LayerNorm groups. The same normalized source slice was enqueued once for every output feature, consuming the node budget with duplicate pending coordinates and producing oversized frontier output.
+
+### v0.4.2 — Unique coordinate scheduling and compact linear fan-in (22 local tests passed; GPT-2 trace remains incomplete)
+
+The follow-up implementation on `feature/neural-connectivity-mapper-v01`:
+- Tracks scheduled coordinate IDs so each tensor coordinate is queued at most once.
+- Deduplicates repeated group traversal for identical source tensor slices, while retaining separate logical group records for distinct target coordinates.
+- Represents `aten::linear`, `aten::matmul`, `aten::bmm`, and `aten::addmm` fan-in as compact dependency groups; bias and addend dependencies remain explicit.
+- Aggregates omitted group members into a bounded node-limit frontier record instead of emitting one record per duplicate candidate.
+- Adds a regression test for repeated LayerNorm groups feeding a Linear projection and updates linear/addmm coordinate tests for compact groups.
+
+**Owner validation:** Windows compilation passed and **22 tests passed in 3.77 seconds**. The GPT-2 coordinate query against the saved v0.4 capture produced 20,000 coordinate nodes (the configured node limit), 19,213 explicit edges (below the 50,000 edge limit), 2,306 dependency groups, 4,626 parameter coordinates and 10,767 frontier records. It reached zero input coordinates and reported null focus reachability.
+
+**Frontier diagnostic:** the owner inspected all frontier categories:
+- `max_nodes`: 5,370 entries.
+- `parameter`: 4,626 terminal entries.
+- `fan_in_limit`: 771 entries, all from `aten::addmm.default`; 768 are in `transformer.h.11.mlp.c_proj` and 3 in `transformer.h.10.mlp.c_proj`.
+- No `unsupported_operator` frontier was reported in this diagnostic.
+
+The `addmm` entries each require 6,145 scalar operand coordinates: 3,072 input-activation coordinates, 3,072 weight coordinates and one bias/addend coordinate. The configured `max_fan_in=4096` rejects this valid but dense operation before its upstream dependencies can be traversed. This is a fan-in policy limit, not evidence of a missing ATen rule.
+
+**Engineering conclusion:** simply raising `max_fan_in` and `max_nodes` for the full backward closure risks expanding millions of parameter coordinates, because dense projection weights are legitimate terminal dependencies but are irrelevant to answering the narrower question "does this selected input token have a path to this selected logit?" The next implementation should add a focused input-to-output reachability/path query that prioritizes activation/index dependencies, keeps parameter dependencies as compact terminal groups, and stops when the requested source coordinate is reached. The existing full-dependency mode should remain available for users who explicitly request the larger closure.
+
+The GPT-2 result remains incomplete and null reachability remains inconclusive. No token-to-logit scalar path or complete GPT-2 scalar graph is claimed yet.
+
+
+### v0.5 — Focused coordinate path search (implementation committed; owner validation pending)
+
+The v0.5 feature adds src/metaobserver/focused_path_tracer.py and src/experiments/trace_focused_coordinate_path.py. It searches backward from one selected output coordinate for one exact source coordinate, then reconstructs a representative path in source-to-target order. It reuses the existing conservative operation-local coordinate rules rather than duplicating the ATen rule set.
+
+By default, activation and index dependencies are explored while parameter dependencies are retained as compact groups. A requested parameter coordinate can still be matched against a compact group. Node, candidate, depth and frontier limits are explicit. Results distinguish path_found, path_not_found, inconclusive_limit and inconclusive_unsupported; a found path can coexist with unresolved alternative branches, so search_complete and frontier must also be inspected.
+
+The v0.4 trace_coordinate_graph() full dependency-closure API remains unchanged. The focused path mode is an additional query mode, not a replacement.
+
+Synthetic regression tests cover an embedding/mean/linear token-to-logit path, a parameter-coordinate source, unsupported operations, node-budget exhaustion, invalid coordinates and identical endpoints. GitHub Actions now compiles the new module and CLI and runs the focused tests alongside the existing observer and full-closure tests.
+
+**Validation boundary:** implementation and test files have been committed to the feature branch, but no local owner test result or GPT-2 v0.5 result is claimed yet. The owner should pull the branch, run the full regression command, and then run the focused GPT-2 apple query documented in docs/NCIFM_FOCUSED_PATH_SEARCH.md. The previous v0.4.2 GPT-2 null reachability result remains inconclusive, not evidence of disconnection.
+
+
+### v0.5.1 — Shared activation dependency-group deduplication (implementation committed; validation pending)
+
+The focused path search now identifies identical activation dependency groups by tensor, coordinate mapping, relation, operator and module scope, and expands each identical group only once. This addresses repeated LayerNorm/softmax fan-in enumeration when multiple output coordinates share the same normalized input slice. The exact requested source coordinate is still checked against each compact group before a repeated expansion is skipped. The first encountered target coordinate is retained as the representative downstream route.
+
+The result summary reports `activation_dependency_groups_expanded` and `activation_dependency_groups_deduplicated`. A regression test covers an embedding → LayerNorm → linear path and verifies that shared LayerNorm activation dependencies are deduplicated while the requested input-token path is found in the synthetic graph.
+
+This is an algorithmic optimization, not a claim that the GPT-2 apple experiment now succeeds. The owner must run the regression suite and repeat the GPT-2 focused query before any GPT-2 reachability result is claimed.
