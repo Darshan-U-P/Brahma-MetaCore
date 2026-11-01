@@ -8,7 +8,7 @@ The long-term goal is to develop a system that can **map a model, learn from its
 
 These are research goals, not established capabilities. Each stage must be tested against controlled baselines, and conclusions must remain proportional to the evidence.
 
-## Current Evidence Snapshot (16 October 2026)
+## Current Evidence Snapshot (1 November 2026)
 
 Brahma MetaCore's long-term objective is to understand how model architecture, parameters, weights, and learned representations produce capabilities, then use that understanding to construct or modify another model. **The current experiments have not yet demonstrated model reconstruction or capability-preserving new-weight generation.**
 
@@ -20,6 +20,7 @@ Brahma MetaCore's long-term objective is to understand how model architecture, p
 | Importance transfer (v0.1) | Mean Top-10% precision: aligned 11.75%, same-index 8.12%, random-map mean 10.25% | Initial positive signal, but inconsistent across layers and target seeds |
 | External-image replication (v0.2, CIFAR-10.1 v6) | Aligned 13.03%, same-index 13.25%, random-map mean 10.18%; aligned beat same-index in 3/9 comparisons | The predefined directional success rule failed; importance-transfer advantage not replicated |
 | New target training (v0.3 preparation) | Seed 2027: 91.74% best validation accuracy; seed 31415: 92.32% | New target checkpoints trained successfully; this is not evidence that transfer works |
+| Stage-4 initialization pilots (construction v0.3-v0.5) | Learned Stage 4 beat a matched random Stage 4 control by +2.35 percentage points in final validation accuracy across six crossed pairs; CIFAR-10.1 v6 accuracy difference averaged +2.89 points | Encouraging, narrow same-task transfer signal; exploratory and limited to two target seeds |
 | Model reconstruction / new-weight generation | Not yet tested | Core objective remains unproven |
 
 ![Activation alignment graph](assets/activation_alignment_v06.png)
@@ -36,10 +37,23 @@ Brahma MetaCore's long-term objective is to understand how model architecture, p
 
 - **Supported:** activation-signature matching finds more correlated channel patterns than same-index matching in the tested models.
 - **Preliminary:** activation alignment can sometimes improve transfer of channel-importance rankings.
+- **Preliminary:** construction pilots v0.3-v0.5 found higher accuracy after learned Stage-4 initialization than after a matched random Stage-4 control. The pilots still train on the same CIFAR-10 task and frozen split; this is not evidence of cross-task transfer or reduced training requirements.
 - **Negative / failed replication:** on CIFAR-10.1 v6, aligned Top-10% precision (13.03%) was slightly below same-index precision (13.25%), and the predefined directional rule failed.
 - **Not tested yet:** constructing a new model from a model map; generating new weights that preserve capabilities; incorporating new data while retaining old capabilities; or reducing pretraining data/compute.
 
-The v0.2 experiment used the same target checkpoints as v0.1, so it is an external-image evaluation, **not** independent-seed replication. The v0.3 target checkpoints with seeds 2027 and 31415 are new independently initialized models, but the v0.3 transfer evaluation has not yet been confirmed complete. The nine layer-level comparisons are dependent and must not be treated as nine independent model replications.
+The v0.2 experiment used the same target checkpoints as v0.1, so it is an external-image evaluation, **not** independent-seed replication. The MetaTransfer v0.3 evaluation on target seeds 2027 and 31415 completed; it remains a small two-target replication. The six layer-level comparisons are dependent and must not be treated as six independent model replications.
+
+### Construction pilot results (reports generated 18 October 2026)
+
+The construction pilots test whether copying learned Stage 4 parameters into a fresh CIFAR-10 ResNet-18 initialization helps after a fixed fine-tuning budget, compared with copying an equally sized Stage 4 from an independent random initialization. The saved reports record that the source checkpoints were unchanged and use the same frozen 45,000/5,000 training/validation split (SHA-256 `803fdf39c7e9468755c7e41e61963a3b16facaab2cf2d5d8bcdbadf7c86eba0d`).
+
+| Pilot | Design | Result | Report |
+| --- | --- | --- | --- |
+| Construction v0.3 | Three source checkpoints, each paired with a different target seed; learned Stage 4 vs random Stage 4 | Learned Stage 4 had a mean **+3.83 percentage-point** best-validation-accuracy difference, positive in 3/3 source groups | `reports/metacore_construction_pilot_v03_stage4_replication/pilot_report.md` |
+| Construction v0.4 | Fully crossed 3 source checkpoints x 2 target seeds; six matched pairs | Mean final-validation-accuracy difference **+2.35 points**, positive in 6/6 pairs | `reports/metacore_construction_pilot_v04_crossed_stage4/pilot_report.md` |
+| Construction v0.5 | Same six-pair design, with post-training CIFAR-10.1 v6 evaluation (2,000 images) | Mean external accuracy difference **+2.89 points**, positive in 6/6 pairs | `reports/metacore_construction_pilot_v05_external_eval/pilot_report.md` |
+
+These are encouraging feasibility results, not confirmatory evidence: only two target seeds were used in the crossed designs; source checkpoints share the same task and training split; validation was used during training/checkpoint selection; and CIFAR-10.1 v6 has appeared in prior project analyses. The v0.5 external evaluation occurred after training, but it is not an untouched benchmark for the project as a whole. The pilots show narrow Stage-4 initialization followed by fine-tuning—not model reconstruction, transfer to a new task, or reduced training compute. See each linked report for arm-level results, run times, and limitations.
 
 ## Core Research Loop
 
@@ -438,9 +452,9 @@ The immediate validation milestone is complete. Preserve v0.1/v0.2/v0.3 reports 
 5. Attempt a first reconstruction or MetaCore-guided initialization, comparing against direct copying (where applicable), random initialization, and conventional training under a matched budget.
 6. Report capability retention, data/compute cost, and regressions. Do not claim reduced pretraining unless the controlled baseline demonstrates it.
 
-## Current Research Status (updated 16 October 2026)
+## Current Research Status (updated 1 November 2026)
 
-**Current stage: model observation, intervention analysis, robust activation alignment, and preliminary importance transfer.**
+**Current stage: model observation, intervention analysis, robust activation alignment, preliminary importance transfer, and early Stage-4 initialization pilots.**
 
 ### Established within the current experimental setup
 
@@ -452,20 +466,21 @@ The immediate validation milestone is complete. Preserve v0.1/v0.2/v0.3 reports 
 - Activation-based channel alignment across four independently trained CIFAR-adapted ResNet-18 checkpoints.
 - v0.7 validation showing stronger matched activation correlation than same-index correspondence across all nine target-layer cases.
 - MetaTransfer v0.1 showing mean Top-10% precision of 11.75% for aligned ranking transfer, compared with 8.12% for same-index transfer and 10.25% for the random-mapping mean.
+- Construction pilots v0.3-v0.5 showing a positive learned-Stage-4 initialization signal versus matched random-Stage-4 controls in the tested same-task setup.
 
 ### Not yet demonstrated
 
 - Consistent superiority of channel-importance transfer over random mappings or statistically reliable improvement across a larger number of independent target models.
 - Generalization across architectures and datasets.
-- A practical improvement from MetaCore-guided parameter transfer or actual target-model modification.
+- A general or statistically reliable practical benefit from parameter transfer across more independent targets, tasks, or architectures. The construction pilots are narrow and exploratory.
 - Construction of a useful target model from a model map.
 - Reliable addition of information or capabilities while preserving prior performance.
 - Reduced data or compute requirements relative to conventional baselines.
 - Recursive improvement of the model-construction process.
 
-## Current Milestone: MetaTransfer v0.3 — Independent-Seed Replication
+## Completed Milestone: MetaTransfer v0.3 — Independent-Seed Replication
 
-**Status as of 16 October 2026: two new target models trained and verified; transfer evaluator created and syntax-checked; local audit and full evaluation still pending.**
+**Status: Completed on 16 October 2026.** The audit passed and the full evaluator completed in 1,468 seconds (approximately 24.5 minutes). The reports are in `reports/metatransfer_v03_new_seeds/`.
 
 Two new CIFAR-adapted ResNet-18 targets were trained on the same frozen 45,000/5,000 split with independent initialization/shuffle seeds:
 
@@ -478,20 +493,13 @@ Two new CIFAR-adapted ResNet-18 targets were trained on the same frozen 45,000/5
 
 These accuracy values are training-quality checks only. They do not establish any benefit from MetaTransfer.
 
-### Evaluation procedure
+### Evaluation protocol
 
-1. Run the evaluator's audit-only mode and inspect the output before running the full experiment.
-2. Freeze source seed-42 importance rankings and the transfer method; compute fresh activation mappings for each new target.
-3. Evaluate target channel effects on CIFAR-10.1 v6 images, without using external labels to derive the channel mapping.
-4. Compare activation-aligned transfer against same-index and random-mapping controls.
-5. Summarize results at the **target-seed level**, with layer-wise detail treated as nested/dependent evidence.
-6. Preserve the v0.1/v0.2 reports and all prior checkpoints. Write only to the new versioned output directory.
-
-The v0.3 script is available separately as `run_metatransfer_v03.py`. It has only been syntax-checked in the preparation environment; it has not been verified against the local project runtime. Run `--audit-only` first. Do not interpret a successful audit as a successful transfer result.
+The run froze source seed-42 importance rankings, computed fresh activation mappings for each target, and evaluated target channel effects on CIFAR-10.1 v6 without using external labels to derive the mapping. It compared activation-aligned transfer with same-index and random-mapping controls. Results and limitations are summarized in the completed report above; layer-level rows remain nested within two target models.
 
 ### Decision rule
 
-A favorable result would be evidence for a narrow importance-transfer method only. It would not demonstrate model reconstruction, general understanding, or reduced pretraining. If the independent-seed results are mixed or negative, record that and move the central research effort toward direct parameter intervention and reconstruction rather than repeatedly tuning channel matching.
+The result is a narrow importance-transfer signal only. It does not demonstrate model reconstruction, general understanding, or reduced pretraining. Continue toward controlled parameter intervention and construction rather than treating channel matching as the end goal.
 
 ## The Core Objective: Understand and Construct Models
 
@@ -519,9 +527,9 @@ Inspect architectures, compare initial and trained parameters, trace activations
 
 ### Phase 2 — Transfer information and construct a target model
 
-**Status: Planned; not demonstrated.**
+**Status: Early feasibility pilots completed; general construction benefit not demonstrated.**
 
-MetaTransfer v0.1 tests transfer of channel-importance rankings only. Actual target initialization, component/parameter transfer, or model construction remains future work and must be compared with conventional methods under matched conditions.
+Construction pilots v0.1-v0.5 test partial/full initialization and learned-versus-random Stage-4 transfer followed by same-task fine-tuning. These do not yet construct a model from a model map, add a new task, or establish a general advantage; broader, independently replicated and budget-matched tests remain future work.
 
 ### Phase 3 — Edit models to add information or capabilities
 
@@ -588,7 +596,26 @@ The main evidence figures in `assets/` are generated from the machine-readable v
 The ambition is broad; the evidence must be earned one experiment at a time.
 
 
-## Reproducible Status Ledger (16 October 2026)
+## Checkout Verification (1 November 2026)
+
+The project root contains `src/`, `tests/`, `configs/`, `data/`, `checkpoints/`, `reports/`, and `assets/`, plus the top-level `requirements.txt` and this README. The automated test suite currently consists of `tests/test_metaobserver.py` (7 tests), covering the CIFAR-10 ResNet-18, model inspection, activation capture, hook cleanup, and JSON serialization.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Root/test inventory | Inspected | One pytest module with 7 test functions; source and experiment reports are present |
+| `python -m pytest -q` | **Blocked; tests did not run** | The selected Python 3.15.2 runtime reported `No module named pytest`. Its Python install-manager bootstrap also hit `WinError 5: Access is denied` under the sandbox. |
+| `python -m compileall -q src tests` | **Not completed** | The Python install-manager bootstrap stalled under the same access restriction and the command was stopped; no syntax-check pass is claimed. |
+
+These are checkout verification attempts, not failures of the test assertions. To finish validation, use the project's intended Python environment with pytest installed, then run:
+
+```powershell
+python -m pytest -q
+python -m compileall -q src tests
+```
+
+The construction results below are summaries of saved reports generated on 18 October 2026; those model-training experiments were not rerun as part of this checkout verification.
+
+## Reproducible Status Ledger (1 November 2026)
 
 | Artifact / result | Status | Interpretation |
 | --- | --- | --- |
@@ -596,26 +623,13 @@ The ambition is broad; the evidence must be earned one experiment at a time.
 | `reports/milestone2_v07/validation_report.json` | Completed | Robustness diagnostics; not a population-level significance test |
 | `reports/metatransfer_v01/transfer_report.json` | Completed | Initial importance-transfer signal |
 | `reports/metatransfer_v02_external_run2` and `.md` | Completed | External-image directional rule failed |
+| `reports/metatransfer_v03_new_seeds/transfer_report.json` | Completed | Two-target independent-seed importance-transfer evaluation; mixed by layer |
 | `checkpoints/metatransfer_v03_seed2027` | Completed | New target model, seed 2027 |
 | `checkpoints/metatransfer_v03_seed31415` | Completed | New target model, seed 31415 |
-| `src/experiments/run_metatransfer_v03.py` | Prepared; local audit pending | Syntax-checked only; do not claim evaluation success yet |
-
-### Next local commands
-
-From the project root in the activated Python environment:
-
-```powershell
-python -m py_compile src\experiments\run_metatransfer_v03.py
-python -m src.experiments.run_metatransfer_v03 --audit-only
-```
-
-Inspect the complete audit output. If it reports errors, stop and fix those before the full evaluation. If the audit passes, run:
-
-```powershell
-python -m src.experiments.run_metatransfer_v03
-```
-
-Do not overwrite previous report directories or checkpoints. After the result is generated, update this README with the measured output—including negative results—before deciding the next experiment.
+| `reports/metacore_construction_pilot_v03_stage4_replication/pilot_report.json` | Completed | Learned Stage 4 beat random Stage 4 in 3/3 source groups; exploratory |
+| `reports/metacore_construction_pilot_v04_crossed_stage4/pilot_report.json` | Completed | Mean +2.35 pp final validation difference in 6 crossed pairs |
+| `reports/metacore_construction_pilot_v05_external_eval/pilot_report.json` | Completed | Mean +2.89 pp CIFAR-10.1 v6 difference in 6 pairs; external dataset has prior project use |
+| `python -m pytest -q` | Blocked in this sandbox | Selected runtime lacks pytest; test assertions were not executed |
 
 
 ## Neural Connectivity and Information-Flow Mapper (NCIFM)
@@ -638,9 +652,9 @@ Inspection of the supplied JSON identified a capture defect: module-hook records
 
 Added implementation:
 - src/metaobserver/computational_graph.py records ATen tensor operands and outputs. Operator nodes include active module-scope annotations; edges record operands and produced tensors.
-- src/metaobserver/neural_connectivity.py separates prompt prefill and each generation pass, records per-pass activations/hidden states/attention, captures an ATen operator/tensor graph for each pass by default, documents logical Q/K/V slices from GPT-2's fused projection, and checks instrumented prompt logits against a direct forward pass.
+- src/metaobserver/neural_connectivity.py separates prompt prefill and each generation pass, records per-pass module outputs, hidden states and attention, captures an ATen operator/tensor graph for each pass by default, documents the logical Q/K/V slices from GPT-2's fused projection, and checks instrumented prompt logits against a direct forward pass.
 - runtime_computational_graphs.json stores the runtime operator/tensor graph separately from model_graph.json.
-- trace_report.json stores pass-wise execution records and a logit parity check.
+- trace_report.json stores pass-wise execution records and the prompt logit parity check.
 - Tests cover operator capture, parameter/input dependencies, pass-specific sequence lengths, parity, truncation and hook cleanup.
 
 ### Interpretation boundary
