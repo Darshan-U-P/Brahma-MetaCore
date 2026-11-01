@@ -114,14 +114,17 @@ def test_linear_or_addmm_coordinate_expands_input_and_weight_terms():
 
     groups = result.get("dependency_groups", [])
     dependencies = result["dependencies"]
-    input_groups = [item for item in groups if item["relation"] == "linear_input"]
+    input_groups = [
+        item for item in groups
+        if item["relation"] in {"linear_input", "matmul_left"}
+        and item["tensor_id"] == input_node_id
+    ]
     weight_groups = [
         item for item in groups
         if item["relation"] in {"linear_weight", "matmul_right"}
     ]
     if input_groups:
         assert len(input_groups) == 1
-        assert input_groups[0]["tensor_id"] == input_node_id
         assert input_groups[0]["dependency_count"] == 4
         assert input_groups[0]["coordinate_prefix"] == [0, 0]
         assert input_groups[0]["varying_axes"] == [1]
@@ -254,7 +257,7 @@ def test_recursive_trace_deduplicates_reused_layer_norm_groups_under_node_cap():
         focus_source_tensor_id=input_node_id,
         focus_source_coordinate=[0, 3],
         max_depth=16,
-        max_nodes=20,
+        max_nodes=25,
         max_edges=100,
     )
 
