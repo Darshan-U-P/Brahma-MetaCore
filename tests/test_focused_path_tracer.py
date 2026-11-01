@@ -71,8 +71,9 @@ def test_shared_layer_norm_activation_group_is_expanded_once():
 
     assert result["result"]["status"] == "path_found"
     assert result["result"]["path_found"] is True
-    assert any(edge["operator"].startswith("aten::layer_norm.")
-               for edge in result["path"])
+    assert any(edge["operator"].startswith(
+        ("aten::layer_norm.", "aten::native_layer_norm.")
+    ) for edge in result["path"])
     assert result["summary"]["activation_dependency_groups_deduplicated"] >= 1
     assert result["summary"]["activation_dependency_groups_expanded"] >= 1
     assert result["summary"]["candidate_dependencies_examined"] < 100
