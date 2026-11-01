@@ -571,7 +571,7 @@ def trace_focused_coordinate_path(
             "A found path may coexist with unresolved alternative branches; inspect search_complete and frontier.",
             "A path_not_found result is conclusive only when search_complete is true.",
             "Compact parameter groups identify participating parameter coordinates without enumerating every scalar by default.",
-            "Identical activation dependency groups are expanded once; their shared scalar dependencies remain connected to the first encountered target coordinate.",
+            "The focused tracer returns one representative route, not a complete scalar dependency graph; identical activation groups are expanded once and represented through the first encountered target coordinate, so alternate parent edges are not enumerated.",
             "Tensor-level source reachability prunes disconnected activation branches; exact coordinate dependencies are still determined only by supported operator rules.",
             "coordinate_nodes_processed counts dequeued coordinates; coordinate_nodes_scheduled includes both processed and queued coordinates.",
         ],
