@@ -8,6 +8,8 @@ on:
       - "src/experiments/run_neural_connectivity_gpt2.py"
       - "src/experiments/trace_computational_path.py"
       - "src/experiments/trace_coordinate_dependencies.py"
+      - "src/experiments/trace_focused_coordinate_path.py"
+      - "src/experiments/trace_focused_coordinate_path.py"
       - "tests/**"
       - ".github/workflows/neural-connectivity-ci.yml"
   pull_request:
@@ -36,7 +38,7 @@ jobs:
           python -m pip install "numpy>=1.26,<2" "pytest>=8,<9"
       - name: Compile NCIFM modules
         run: |
-          python -m py_compile src/metaobserver/computational_graph.py src/metaobserver/neural_connectivity.py src/metaobserver/path_tracer.py src/metaobserver/coordinate_tracer.py
-          python -m py_compile src/experiments/run_neural_connectivity_gpt2.py src/experiments/trace_computational_path.py src/experiments/trace_coordinate_dependencies.py
+          python -m py_compile src/metaobserver/computational_graph.py src/metaobserver/neural_connectivity.py src/metaobserver/path_tracer.py src/metaobserver/coordinate_tracer.py src/metaobserver/focused_path_tracer.py
+          python -m py_compile src/experiments/run_neural_connectivity_gpt2.py src/experiments/trace_computational_path.py src/experiments/trace_coordinate_dependencies.py src/experiments/trace_focused_coordinate_path.py
       - name: Run new and existing observer tests
-        run: python -m pytest tests/test_coordinate_tracer.py tests/test_path_tracer.py tests/test_neural_connectivity.py tests/test_metaobserver.py -q
+        run: python -m pytest tests/test_focused_path_tracer.py tests/test_coordinate_tracer.py tests/test_path_tracer.py tests/test_neural_connectivity.py tests/test_metaobserver.py -q
