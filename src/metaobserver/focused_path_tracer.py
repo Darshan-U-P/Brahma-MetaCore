@@ -135,7 +135,8 @@ def trace_focused_coordinate_path(
         if search_strategy == "source_guided":
             primary, secondary = distance, depth
         else:
-            primary, secondary = depth, distance
+            # Sequence is the FIFO tie-breaker for true breadth-first ordering.
+            primary, secondary = depth, 0
         heapq.heappush(
             queue,
             (primary, secondary, next(queue_sequence), depth, tensor_id, coordinate),
