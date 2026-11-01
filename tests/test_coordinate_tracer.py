@@ -112,16 +112,32 @@ def test_linear_or_addmm_coordinate_expands_input_and_weight_terms():
     result = trace_tensor_coordinate(graph, output_id, [0, 1])
     assert result["status"] == "expanded"
 
-    input_dependencies = [
-        item for item in result["dependencies"]
-        if item["tensor_id"] == input_node_id
+    groups = result.get("dependency_groups", [])
+    dependencies = result["dependencies"]
+    input_groups = [item for item in groups if item["relation"] == "linear_input"]
+    weight_groups = [
+        item for item in groups
+        if item["relation"] in {"linear_weight", "matmul_right"}
     ]
-    assert len(input_dependencies) == 4
-    assert {tuple(item["coordinate"]) for item in input_dependencies} == {
-        (0, 0), (0, 1), (0, 2), (0, 3)
-    }
-    assert any(item["relation"] in {"linear_weight", "matmul_right"}
-               for item in result["dependencies"])
+    if input_groups:
+        assert len(input_groups) == 1
+        assert input_groups[0]["tensor_id"] == input_node_id
+        assert input_groups[0]["dependency_count"] == 4
+        assert input_groups[0]["coordinate_prefix"] == [0, 0]
+        assert input_groups[0]["varying_axes"] == [1]
+        assert len(weight_groups) == 1
+    else:
+        input_dependencies = [
+            item for item in dependencies if item["tensor_id"] == input_node_id
+        ]
+        assert len(input_dependencies) == 4
+        assert {tuple(item["coordinate"]) for item in input_dependencies} == {
+            (0, 0), (0, 1), (0, 2), (0, 3)
+        }
+        assert any(
+            item["relation"] in {"linear_weight", "matmul_right"}
+            for item in dependencies
+        )
 
 
 class EmbeddingMeanProjection(nn.Module):
@@ -214,3 +230,38 @@ def test_layer_norm_uses_compact_dependency_group_and_expands_all_input_coordina
     assert len(recursive["input_coordinates"]) == 4
     assert recursive["summary"]["dependency_group_count"] >= 1
     assert recursive["summary"]["truncated"] is False
+
+
+
+class NormalizeThenLinear(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.norm = nn.LayerNorm(4)
+        self.projection = nn.Linear(4, 3)
+
+    def forward(self, values):
+        return self.projection(self.norm(values))
+
+
+def test_recursive_trace_deduplicates_reused_layer_norm_groups_under_node_cap():
+    values = torch.randn(1, 4)
+    graph, input_node_id = capture_graph(NormalizeThenLinear(), values)
+
+    result = trace_coordinate_graph(
+        graph,
+        "model_output:output",
+        [0, 1],
+        focus_source_tensor_id=input_node_id,
+        focus_source_coordinate=[0, 3],
+        max_depth=16,
+        max_nodes=20,
+        max_edges=100,
+    )
+
+    assert result["query"]["focus_source_reaches_target"] is True
+    assert any(
+        item["tensor_id"] == input_node_id and item["coordinate"] == [0, 3]
+        for item in result["input_coordinates"]
+    )
+    assert result["summary"]["truncated"] is False
+    assert not any(item["reason"] == "max_nodes" for item in result["frontier"])
