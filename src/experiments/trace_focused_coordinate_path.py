@@ -52,10 +52,10 @@ def main() -> None:
         raise CoordinateTraceError(f"Model input {args.source_input!r} was not captured.")
     if target_node is None:
         raise CoordinateTraceError(f"Model output {target_id!r} was not captured.")
-    if len(source_node.get("shape", [])) != 2:
-        raise CoordinateTraceError("CLI currently expects a rank-2 token input tensor.")
-    if len(target_node.get("shape", [])) != 3:
-        raise CoordinateTraceError("CLI currently expects rank-3 logits [batch, sequence, vocabulary].")
+    if len(source_node.get("shape", [])) != 2 or source_node["shape"][0] != 1:
+        raise CoordinateTraceError("CLI currently expects a batch-size-1 rank-2 token input tensor.")
+    if len(target_node.get("shape", [])) != 3 or target_node["shape"][0] != 1:
+        raise CoordinateTraceError("CLI currently expects batch-size-1 logits [1, sequence, vocabulary].")
     input_ids = pass_record.get("input_token_ids")
     if input_ids is None:
         raise CoordinateTraceError("Trace report has no saved input_token_ids for lookup resolution.")
