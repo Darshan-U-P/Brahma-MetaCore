@@ -213,7 +213,7 @@ def test_node_budget_drains_already_scheduled_coordinates_before_stopping():
         graph,
         input_id, [0, 2],
         "model_output:logits", [0, 2],
-        max_depth=8, max_nodes=2, max_candidates=10,
+        max_depth=8, max_nodes=3, max_candidates=10,
     )
 
     # The add output schedules the first clone branch, then reaches the node
