@@ -245,7 +245,15 @@ def trace_focused_coordinate_path(
             })
             unsupported_seen = True
 
-        for group in expansion.get("dependency_groups", []):
+        dependency_groups = expansion.get("dependency_groups", [])
+        if search_strategy == "source_guided":
+            dependency_groups = sorted(
+                dependency_groups,
+                key=lambda group: source_tensor_distances.get(
+                    group["tensor_id"], 1_000_000_000
+                ),
+            )
+        for group in dependency_groups:
             group_tensor_id = group["tensor_id"]
             group_node = nodes[group_tensor_id]
             relation = group["relation"]
@@ -376,7 +384,15 @@ def trace_focused_coordinate_path(
         if limit_this_expansion:
             continue
 
-        for dependency in expansion.get("dependencies", []):
+        dependencies = expansion.get("dependencies", [])
+        if search_strategy == "source_guided":
+            dependencies = sorted(
+                dependencies,
+                key=lambda dependency: source_tensor_distances.get(
+                    dependency["tensor_id"], 1_000_000_000
+                ),
+            )
+        for dependency in dependencies:
             dep_tensor_id = dependency["tensor_id"]
             dep_coordinate = tuple(dependency["coordinate"])
             dep_id = _coordinate_node_id(dep_tensor_id, dep_coordinate)
