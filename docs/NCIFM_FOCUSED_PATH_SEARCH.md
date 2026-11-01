@@ -87,5 +87,5 @@ The tracer now records:
 
 Operator timings measure the coordinate-rule expansion call, not total time spent enumerating groups, scheduling coordinates, serializing JSON, or executing the model. Use them to identify candidates for deeper profiling, not as a complete end-to-end performance breakdown.
 
-A deterministic synthetic-graph regression test uses two source-reachable branches and a two-node scheduling budget. It verifies that the first queued branch is still processed and can yield a valid source-to-target path after the second branch hits the node limit. This isolates queue-draining semantics from the fan-in and operator decomposition of a particular PyTorch model.
+A captured PyTorch regression test uses two clone branches from the same input and a two-node scheduling budget. The add output queues one clone branch and reaches the limit on the other; expanding the queued clone must still discover the exact source coordinate. This keeps the test on the real runtime-graph capture path while avoiding the deeper fan-in of linear layers.
 
