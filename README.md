@@ -115,6 +115,14 @@ The hardware and software details describe the current experimental environment;
 
 ## Experimental Progress
 
+### NCIFM — Neural Connectivity and Information Flow Mapper
+
+**Current feature branch:** focused coordinate-path search v0.5.2 (validation pending).
+
+NCIFM captures runtime tensor/operator dependencies and traces coordinate-level paths from selected model inputs to outputs. The v0.5.2 focused search adds source-aware tensor reachability pruning, exact source-coordinate matching against compact activation groups, and separate scheduled/processed/queued search metrics. These changes improve search efficiency without turning tensor-level reachability into a claim of exact scalar dependency.
+
+The owner validated the v0.5.1 regression suite locally (29 tests passed). v0.5.2 changes have been committed to the feature branch; new local test and GPT-2 experiment results are not yet available. See [NCIFM focused path search](docs/NCIFM_FOCUSED_PATH_SEARCH.md) for API, semantics, validation commands and interpretation limits.
+
 ### 1. MetaObserver v0.1 — Neural-network inspection
 
 **Status: Implemented and tested**
