@@ -107,8 +107,8 @@ class GPT2TraceRecorder:
     def __init__(
         self, model: nn.Module, tokenizer: Any, top_k: int = 20,
         max_ops: int = 50_000, max_activation_values: int = 50_000,
-        capture_generation_attention: bool = False,
-        trace_generation_ops: bool = False,
+        capture_generation_attention: bool = True,
+        trace_generation_ops: bool = True,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -403,8 +403,8 @@ def main() -> None:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--max-ops", type=int, default=50_000)
     parser.add_argument("--max-activation-values", type=int, default=50_000)
-    parser.add_argument("--capture-generation-attention", action="store_true")
-    parser.add_argument("--trace-generation-ops", action="store_true")
+    parser.add_argument("--skip-generation-attention", action="store_false", dest="capture_generation_attention", default=True)
+    parser.add_argument("--skip-generation-ops", action="store_false", dest="trace_generation_ops", default=True)
     args = parser.parse_args()
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer

@@ -49,7 +49,7 @@ python -m src.experiments.run_neural_connectivity_gpt2 `
   --max-new-tokens 8
 ```
 
-Optional full attention at each generation step:
+Optional lightweight run (skip generation-step attention):
 
 ```powershell
 python -m src.experiments.run_neural_connectivity_gpt2 `
@@ -57,10 +57,10 @@ python -m src.experiments.run_neural_connectivity_gpt2 `
   --text "What is an apple?" `
   --output reports/neural_connectivity/apple_demo_v02_full_attention `
   --max-new-tokens 8 `
-  --capture-generation-attention
+  --skip-generation-attention
 ```
 
-Optional operator graphs for generation passes (higher overhead; start with fewer tokens):
+Optional lightweight run (skip generation-step operator graphs):
 
 ```powershell
 python -m src.experiments.run_neural_connectivity_gpt2 `
@@ -68,10 +68,10 @@ python -m src.experiments.run_neural_connectivity_gpt2 `
   --text "What is an apple?" `
   --output reports/neural_connectivity/apple_demo_v02_full_ops `
   --max-new-tokens 3 `
-  --trace-generation-ops
+  --skip-generation-ops
 ```
 
-Default behavior captures an operator graph for prompt prefill and pass-specific module/hidden-state records during generation. Generation attention and generation operator graphs are opt-in.
+Default behavior captures attention tensors and an operator/tensor dependency graph for the prompt and every generation forward pass. This gives each token-producing computation its own trace. Use --skip-generation-attention or --skip-generation-ops only for lower-overhead runs.
 
 ## Acceptance gates
 
@@ -92,6 +92,6 @@ Add graph path queries, upstream logit tracing, downstream input tracing, contro
 
 - Operator trace cap: 50,000 ATen operations per captured pass.
 - Activation values retained up to 50,000 per tensor; larger tensors keep a prefix and complete summary statistics.
-- Prompt attention is captured by default.
-- Generation attention and generation-pass operator graphs are opt-in.
+- Prompt and generation attention are captured by default.
+- Prompt and generation operator graphs are captured by default; skip flags reduce overhead.
 - Keep reports/checkpoints out of Git and preserve each experiment in a separate output directory.

@@ -638,7 +638,7 @@ Inspection of the supplied JSON identified a capture defect: module-hook records
 
 Added implementation:
 - src/metaobserver/computational_graph.py records ATen tensor operands and outputs. Operator nodes include active module-scope annotations; edges record operands and produced tensors.
-- src/metaobserver/neural_connectivity.py separates prompt prefill and each generation pass, records per-pass activations/hidden states, documents the logical Q/K/V slices from GPT-2's fused projection, and checks instrumented logits against a direct forward pass.
+- src/metaobserver/neural_connectivity.py separates prompt prefill and each generation pass, records per-pass activations/hidden states/attention, captures an ATen operator/tensor graph for each pass by default, documents logical Q/K/V slices from GPT-2's fused projection, and checks instrumented prompt logits against a direct forward pass.
 - runtime_computational_graphs.json stores the runtime operator/tensor graph separately from model_graph.json.
 - trace_report.json stores pass-wise execution records and a logit parity check.
 - Tests cover operator capture, parameter/input dependencies, pass-specific sequence lengths, parity, truncation and hook cleanup.
