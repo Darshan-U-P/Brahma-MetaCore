@@ -746,3 +746,12 @@ The v0.4 trace_coordinate_graph() full dependency-closure API remains unchanged.
 Synthetic regression tests cover an embedding/mean/linear token-to-logit path, a parameter-coordinate source, unsupported operations, node-budget exhaustion, invalid coordinates and identical endpoints. GitHub Actions now compiles the new module and CLI and runs the focused tests alongside the existing observer and full-closure tests.
 
 **Validation boundary:** implementation and test files have been committed to the feature branch, but no local owner test result or GPT-2 v0.5 result is claimed yet. The owner should pull the branch, run the full regression command, and then run the focused GPT-2 apple query documented in docs/NCIFM_FOCUSED_PATH_SEARCH.md. The previous v0.4.2 GPT-2 null reachability result remains inconclusive, not evidence of disconnection.
+
+
+### v0.5.1 — Shared activation dependency-group deduplication (implementation committed; validation pending)
+
+The focused path search now identifies identical activation dependency groups by tensor, coordinate mapping, relation, operator and module scope, and expands each identical group only once. This addresses repeated LayerNorm/softmax fan-in enumeration when multiple output coordinates share the same normalized input slice. The exact requested source coordinate is still checked against each compact group before a repeated expansion is skipped. The first encountered target coordinate is retained as the representative downstream route.
+
+The result summary reports `activation_dependency_groups_expanded` and `activation_dependency_groups_deduplicated`. A regression test covers an embedding → LayerNorm → linear path and verifies that shared LayerNorm activation dependencies are deduplicated while the requested input-token path is found in the synthetic graph.
+
+This is an algorithmic optimization, not a claim that the GPT-2 apple experiment now succeeds. The owner must run the regression suite and repeat the GPT-2 focused query before any GPT-2 reachability result is claimed.
