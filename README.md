@@ -681,3 +681,23 @@ The project owner ran the query against the saved GPT-2 Small prompt-prefill tra
 - Hosted CI: CPU dependency installation, NCIFM compilation and all 15 tests passed.
 
 The 70-node shortest route is one representative route, not the complete computational flow or an attribution ranking. Endpoint coordinates annotate positions in whole tensors; they do not isolate token-to-neuron or neuron-to-logit scalar dependencies. The full upstream graph includes attention and MLP operations as well as residual-stream paths. Computational dependency does not establish semantic meaning or causal contribution.
+
+### v0.4 — Coordinate-resolved dependency tracing (implementation added; local validation pending)
+
+The v0.4 implementation adds `src/metaobserver/coordinate_tracer.py` and `src/experiments/trace_coordinate_dependencies.py`. Runtime operator nodes now retain JSON-safe ATen argument metadata, including named tensor-operand references and scalar arguments. The runtime graph schema version is `0.3.0`; tensor contents are not copied into this metadata.
+
+The coordinate tracer resolves one selected output scalar into its immediate scalar operand coordinates and can recursively build a bounded backward coordinate-dependency graph. Implemented rules cover:
+- Embedding lookup and selected embedding-table row resolution from captured input IDs.
+- Elementwise unary operations and broadcast binary operations.
+- Linear, `addmm`, matrix multiplication and batched matrix multiplication.
+- Layer normalization / native layer normalization and softmax.
+- Transpose, permute, view/reshape, slice, select, squeeze, unsqueeze and expand.
+- Sum and mean reductions.
+
+Unknown/fused operations and depth, fan-in, node or edge limits are explicit frontiers. A partial trace is not evidence that omitted dependencies do not exist. Embedding index edges are labelled as lookup/routing dependencies, not numeric additive contributions.
+
+**Compatibility:** v0.2 GPT-2 runtime graph files predate operator-argument capture. Generate a new GPT-2 trace before using the v0.4 coordinate CLI; do not reuse `apple_demo_v02/runtime_computational_graphs.json` for coordinate tracing. See `docs/NCIFM_COORDINATE_TRACING.md`.
+
+**Hosted validation:** GitHub Actions run [41305564246](https://github.com/Darshan-U-P/Brahma-MetaCore/actions/runs/41305564246) passed module compilation and **20 tests** (coordinate tracer, path tracer, neural connectivity, and MetaObserver). Local Windows validation of v0.4 remains pending.
+
+The v0.4 coordinate graph describes mathematical operand dependencies for one recorded execution. It does not yet establish contribution magnitude, semantic function, causal necessity, or a complete neuron/attention-head map of GPT-2.
