@@ -616,3 +616,37 @@ python -m src.experiments.run_metatransfer_v03
 ```
 
 Do not overwrite previous report directories or checkpoints. After the result is generated, update this README with the measured output—including negative results—before deciding the next experiment.
+
+
+## Neural Connectivity and Information-Flow Mapper (NCIFM)
+
+**Milestone status: v0.2 implementation added; local validation pending.**
+
+### v0.1 — GPT-2 observation baseline
+
+The first local GPT-2 run was reported successful on CUDA:
+- Model: GPT2LMHeadModel, 124,439,808 parameters.
+- Module inventory: 163 modules.
+- Prompt: "What is an apple?", tokenized into 5 tokens.
+- Prompt attention: 12 layers, each shaped [1, 12, 5, 5].
+- Hidden-state stages: 13.
+- Greedy generation: 8 tokens.
+
+Inspection of the supplied JSON identified a capture defect: module-hook records had been overwritten by autoregressive generation, so final module activations represented a 12-token context while prompt attention represented the original 5-token prompt.
+
+### v0.2 — Pass-specific traces and operator-level tensor graph
+
+Added implementation:
+- src/metaobserver/computational_graph.py records ATen tensor operands and outputs. Operator nodes include active module-scope annotations; edges record operands and produced tensors.
+- src/metaobserver/neural_connectivity.py separates prompt prefill and each generation pass, records per-pass activations/hidden states, documents the logical Q/K/V slices from GPT-2's fused projection, and checks instrumented logits against a direct forward pass.
+- runtime_computational_graphs.json stores the runtime operator/tensor graph separately from model_graph.json.
+- trace_report.json stores pass-wise execution records and a logit parity check.
+- Tests cover operator capture, parameter/input dependencies, pass-specific sequence lengths, parity, truncation and hook cleanup.
+
+### Interpretation boundary
+
+Runtime edges record actual tensor operands and operator outputs for a particular forward pass. They are computational dependencies, not semantic labels or causal attribution. The current graph does not yet decompose every dense operation into scalar neuron-to-neuron contributions. Causal claims require controlled interventions and controls.
+
+### Validation status
+
+The project owner reported the v0.1 prototype and 10 tests successful on Windows/CUDA. The v0.2 changes require the new local tests before they are considered validated.

@@ -1,18 +1,30 @@
 {
-  "$schema":"https://json-schema.org/draft/2020-12/schema",
-  "title":"Brahma MetaCore Neural Connectivity Trace",
-  "type":"object",
-  "required":["schema_version","experiment_id","input","model","structural_graph","runtime_trace","metadata"],
-  "properties":{
-    "schema_version":{"type":"string"},
-    "experiment_id":{"type":"string"},
-    "created_at":{"type":"string","format":"date-time"},
-    "input":{"type":"object","required":["text","input_ids","tokens","sequence_length"],
-      "properties":{"text":{"type":"string"},"input_ids":{"type":"array","items":{"type":"integer"}},
-        "tokens":{"type":"array","items":{"type":"string"}},"sequence_length":{"type":"integer","minimum":1}}},
-    "model":{"type":"object"},
-    "structural_graph":{"type":"object","required":["nodes","edges"],
-      "properties":{"nodes":{"type":"array"},"edges":{"type":"array"}}},
-    "runtime_trace":{"type":"object"},"metadata":{"type":"object"}
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Brahma MetaCore NCIFM Trace Report",
+  "type": "object",
+  "required": ["schema_version", "experiment_id", "input", "model", "structural_graph", "runtime_trace", "artifacts", "metadata"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "experiment_id": {"type": "string"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "input": {
+      "type": "object",
+      "required": ["text", "input_ids", "tokens", "sequence_length"],
+      "properties": {
+        "text": {"type": "string"},
+        "input_ids": {"type": "array", "items": {"type": "integer"}},
+        "tokens": {"type": "array", "items": {"type": "string"}},
+        "sequence_length": {"type": "integer", "minimum": 1}
+      }
+    },
+    "model": {"type": "object"},
+    "structural_graph": {"type": "object", "required": ["nodes", "edges"],
+      "properties": {"nodes": {"type": "array"}, "edges": {"type": "array"}}},
+    "runtime_trace": {"type": "object",
+      "required": ["passes", "generation_steps", "parity_check", "operator_graph_summary"],
+      "properties": {"passes": {"type": "object"}, "generation_steps": {"type": "array"},
+        "parity_check": {"type": "object"}, "operator_graph_summary": {"type": "object"}}},
+    "artifacts": {"type": "object"},
+    "metadata": {"type": "object"}
   }
 }

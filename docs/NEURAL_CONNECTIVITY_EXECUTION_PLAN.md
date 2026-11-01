@@ -1,71 +1,97 @@
-# Brahma MetaCore — Neural Connectivity Execution Plan
+# Brahma MetaCore — NCIFM Execution Plan
 
-**Milestone:** NCIFM v0.1 — GPT-2 passive trace prototype.
+**Milestone:** Neural Connectivity and Information-Flow Mapper v0.2  
+**Prototype:** GPT-2 Small / Hugging Face Transformers
 
-## Objective
+## Evidence from the first local run
 
-For an input such as `What is an apple?`, record tokenization, module and parameter inventory, input-conditioned hidden states, per-layer attention tensors with token-position axes, MLP/module outputs, logits, top next-token probabilities and optional greedy-generation steps.
+The v0.1 run loaded GPT-2 on CUDA, inventoried 124,439,808 parameters and 163 modules, captured 12 prompt attention layers with shape [1, 12, 5, 5], and recorded 13 hidden-state stages. The supplied JSON showed that module-hook data had been overwritten by generation: attention described the five-token prompt while the final module activations described a 12-token context.
 
-## Components
+## Objectives
 
-1. Hugging Face GPT-2 model/tokenizer loader.
-2. Architecture/module/parameter inventory including tensor dimensions and statistics.
-3. Token and position recorder.
-4. Runtime module hooks with guaranteed cleanup.
-5. Attention capture using eager attention outputs.
-6. Hidden-state and MLP-output capture.
-7. Structural module/parameter ownership graph.
-8. Execution-order graph, explicitly distinguished from a true fine-grained tensor dependency graph.
-9. JSON report writer using a new experiment directory.
+1. Keep prompt prefill and every autoregressive generation pass in separate records.
+2. Store each pass's token IDs, tokens, context length, module outputs, hidden states and optional attention.
+3. Reuse prompt-prefill logits for generation step zero.
+4. Compare instrumented prompt logits with an uninstrumented direct forward pass.
+5. Preserve static module/parameter ownership graph.
+6. Capture actual ATen tensor operands and outputs, with module-scope annotations.
+7. Store the runtime graph separately from the structural graph.
 
 ## Graph semantics
 
-Structural edges describe module containment and parameter ownership. Execution-order edges describe observed stage ordering only. Attention weights describe token-position routing; neither attention nor co-activation alone establishes semantic meaning or causality. Future tensor-level dependencies require operator-level tracing (e.g. FX/export or architecture-specific instrumentation), including tensor operands and parameter operands. Causal attribution requires interventions and controls.
+**Structural graph:** module containment and parameter ownership.
 
-## Execution phases
+**Runtime tensor dependency graph:** PyTorch dispatch mode observes ATen operations and the tensors consumed/produced. Each operation becomes an operator node, input tensors connect to it with operand edges, and its result tensors connect with produces edges. Every operator is tagged with its innermost active module where available.
 
-1. Run unit tests for graph creation, inventory, JSON serialization and hook cleanup.
-2. Run one GPT-2 prompt and inspect trace artifacts.
-3. Compare captured logits with a direct forward pass.
-4. Repeat identical prompt/model revision to test numerical repeatability.
-5. Sweep controlled prompt variants (apple/banana/car; fruit/company; context changes).
-6. Add interventions only after passive trace fidelity is validated.
-7. Generalize adapter APIs to other Transformers, then ANN/CNN models.
-8. Build interactive 3D visualization on a stable graph schema.
+This is an execution-specific dependency graph. It does not decompose dense matrix multiplication into every scalar neuron-to-neuron contribution and does not establish semantic meaning or causal importance. Attention weights are token-position routing values, not explanations.
 
-## Windows PowerShell
+GPT-2's Q/K/V projection is fused in c_attn. The report describes the logical Q/K/V contiguous slices and preserves the fused tensor.
+
+## Files written per run
+
+- trace_report.json — tokenization, model inventory, separate pass records, module activations, hidden states, attention, logits, generation sequence and parity check.
+- model_graph.json — static module/parameter ownership graph.
+- runtime_computational_graphs.json — ATen operator/tensor dependency graph for captured passes.
+
+## Windows commands
 
 ```powershell
-# Activate the project's compatible environment first.
-python -m pip install transformers
+git pull origin feature/neural-connectivity-mapper-v01
+
+python -m py_compile src\metaobserver\computational_graph.py src\metaobserver\neural_connectivity.py
 python -m pytest tests/test_neural_connectivity.py tests/test_metaobserver.py -q
 
+# Use a new directory; do not overwrite apple_demo v0.1.
 python -m src.experiments.run_neural_connectivity_gpt2 `
   --model openai-community/gpt2 `
   --text "What is an apple?" `
-  --output reports/neural_connectivity/apple_demo `
+  --output reports/neural_connectivity/apple_demo_v02 `
   --max-new-tokens 8
-
-Get-Item reports/neural_connectivity/apple_demo/trace_report.json
-Get-Item reports/neural_connectivity/apple_demo/model_graph.json
 ```
 
-The first execution downloads GPT-2. Auto device selection uses CUDA when available and CPU otherwise. With a 4 GB GPU, begin with short prompts. Full attention values are retained only below a size threshold; summary statistics remain available.
+Optional full attention at each generation step:
 
-## Storage and reproducibility
+```powershell
+python -m src.experiments.run_neural_connectivity_gpt2 `
+  --model openai-community/gpt2 `
+  --text "What is an apple?" `
+  --output reports/neural_connectivity/apple_demo_v02_full_attention `
+  --max-new-tokens 8 `
+  --capture-generation-attention
+```
 
-Use unique run directories; preserve prior outputs. Store model revision, environment, device, input text, token IDs, tokens and tensor metadata. Avoid committing checkpoints or large traces. Later batch runs should use resumable manifests, compressed shards and disk quotas.
+Optional operator graphs for generation passes (higher overhead; start with fewer tokens):
+
+```powershell
+python -m src.experiments.run_neural_connectivity_gpt2 `
+  --model openai-community/gpt2 `
+  --text "What is an apple?" `
+  --output reports/neural_connectivity/apple_demo_v02_full_ops `
+  --max-new-tokens 3 `
+  --trace-generation-ops
+```
+
+Default behavior captures an operator graph for prompt prefill and pass-specific module/hidden-state records during generation. Generation attention and generation operator graphs are opt-in.
 
 ## Acceptance gates
 
-- Inventory and graph serialize to JSON.
-- Token IDs and token strings are preserved.
-- Hidden states, attention and MLP outputs are captured for supported GPT-2 implementations.
-- Logits and top next-token probabilities are reported.
-- Hooks are removed even when execution raises.
+- Prompt module activations match the prompt sequence length.
+- Every generated-token forward pass has a separate context length and activation record.
+- No pass overwrites another.
+- Runtime graph includes model-input, parameter, operator and computed-tensor nodes plus operand/produces edges.
+- Operator graph reports truncation if max_ops is reached.
+- Instrumented logits match direct-forward logits within tolerance.
+- Hooks are removed after success or exceptions.
 - Existing MetaObserver tests remain unchanged.
-- Direct-forward parity and repeatability are checked before interpreting traces.
 
-## Not included in v0.1
+## Later stages
 
-Exhaustive input coverage, automatic neuron semantics, complete neuron-to-neuron causal path decomposition, interactive 3D visualization, automatic weight editing, capability transfer or model construction.
+Add graph path queries, upstream logit tracing, downstream input tracing, controlled interventions, interactive 3D visualization and architecture adapters for other Transformers, ANN and CNN families.
+
+## Resource controls
+
+- Operator trace cap: 50,000 ATen operations per captured pass.
+- Activation values retained up to 50,000 per tensor; larger tensors keep a prefix and complete summary statistics.
+- Prompt attention is captured by default.
+- Generation attention and generation-pass operator graphs are opt-in.
+- Keep reports/checkpoints out of Git and preserve each experiment in a separate output directory.
