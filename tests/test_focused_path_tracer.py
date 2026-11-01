@@ -201,3 +201,32 @@ def test_same_coordinate_source_and_target_returns_empty_path():
     )
     assert result["result"]["status"] == "path_found"
     assert result["path"] == []
+
+
+def test_node_budget_drains_already_scheduled_coordinates_before_stopping():
+    class TwoBranchProjection(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.left = nn.Linear(4, 3)
+            self.right = nn.Linear(4, 3)
+
+        def forward(self, values):
+            return self.left(values) + self.right(values)
+
+    graph, input_id = capture(TwoBranchProjection(), torch.randn(1, 4))
+    result = trace_focused_coordinate_path(
+        graph,
+        input_id, [0, 2],
+        "model_output:logits", [0, 1],
+        max_depth=16, max_nodes=2, max_candidates=100,
+    )
+
+    # The target's first branch is already queued when the second branch hits
+    # the scheduling limit. The tracer must still process that queued branch.
+    assert result["result"]["path_found"] is True
+    assert result["result"]["status"] == "path_found"
+    assert result["summary"]["resource_limit_reached"] is True
+    assert result["summary"]["coordinate_nodes_processed"] >= 2
+    assert result["summary"]["queue_remaining_at_stop"] == 0
+    assert result["result"]["search_complete"] is False
+
