@@ -64,7 +64,7 @@ def test_shared_layer_norm_activation_group_is_expanded_once():
     result = trace_focused_coordinate_path(
         graph,
         input_id, [0, 0],
-        "model_output:logits", [0, 0],
+        "model_output:logits", [0, 0, 0],
         tensor_values={input_id: [[3, 9]]},
         max_depth=32, max_nodes=2000, max_candidates=100,
     )
