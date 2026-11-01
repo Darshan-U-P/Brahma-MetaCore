@@ -1,6 +1,6 @@
 # NCIFM v0.4 — Coordinate-Resolved Dependency Tracing
 
-**Status:** Implementation added; local execution and validation are pending.
+**Status:** v0.4.1 has passed the owner's 21-test local suite; its GPT-2 coordinate run remains incomplete. v0.4.2 traversal and compact linear-fan-in changes are implemented on the feature branch; validation is pending.
 
 ## Objective
 
@@ -106,3 +106,22 @@ The explicit edge cap now stops edge expansion immediately and emits a bounded f
 The first GPT-2 coordinate result was inconclusive: the 50,000-edge cap was reached before input token position 3 was reached. A null reachability result is not evidence of no dependency. The compact-group change is intended to make the next trace more tractable; it does not guarantee a complete GPT-2 scalar graph.
 
 A new small-model test validates compact LayerNorm group metadata and confirms that all normalized input coordinates are reached recursively. Run the full tests and repeat the GPT-2 coordinate experiment before treating v0.4.1 as validated.
+
+
+## v0.4.2 — Unique coordinate scheduling and compact linear fan-in
+
+The owner's v0.4.1 rerun passed compilation and **21 tests**, but the GPT-2 coordinate query remained incomplete: 13,911 coordinate nodes, 50,000 explicit edges, 768 dependency groups, 2,304 parameter coordinates, 577,545 frontier records, zero reached input coordinates, and null focus reachability. The edge limit was reached and the graph was truncated. This result does not establish that the selected token is disconnected from the logit.
+
+Code inspection identified a traversal inefficiency in addition to the graph's genuine fan-in:
+- Every output coordinate in a shared normalization slice can refer to the same source-coordinate group.
+- v0.4.1 preserved the compact group record but scheduled its source coordinates repeatedly for each output coordinate.
+- Duplicate pending coordinates consumed the node budget before the walker could finish processing unique coordinates. When the cap was reached, the implementation emitted a frontier record for each remaining duplicate candidate.
+
+The v0.4.2 follow-up changes:
+- Track scheduled coordinate IDs, not just already-processed nodes, so a source tensor coordinate is queued once.
+- Deduplicate traversal of identical dependency-group source slices while retaining separate logical group records for their distinct target coordinates.
+- Represent `aten::linear`, `aten::matmul`, `aten::bmm`, and `aten::addmm` contraction fan-in as compact dependency groups. Bias and addend dependencies remain explicit scalar dependencies.
+- Record a bounded group-level `max_nodes` frontier summary instead of writing one frontier item for every omitted group member.
+- Add a recursive LayerNorm-plus-Linear regression test designed to expose repeated group scheduling under a small node cap, and update the local linear/addmm coordinate assertions for compact groups.
+
+The v0.4.2 implementation has **not yet been locally or hosted-CI validated**. The previous v0.4.1 run is retained as evidence of the issue; do not replace or reinterpret it. Run compilation and the full NCIFM test subset, then repeat the coordinate query against the existing v0.4 GPT-2 capture. A successful compact traversal would still be a bounded mathematical dependency trace for one execution, not semantic attribution or causal proof.
