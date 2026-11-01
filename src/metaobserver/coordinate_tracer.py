@@ -822,6 +822,20 @@ def trace_coordinate_graph(
     for edge in coordinate_edges:
         if edge["source"] in adjacency and edge["target"] in adjacency:
             adjacency[edge["source"]].append(edge["target"])
+    # Compact dependency groups are logical coordinate edges too. Include them
+    # in reachability without expanding them into serialized edge records.
+    for group in dependency_groups:
+        target_id = group["target_coordinate_node_id"]
+        axes = group["varying_axes"]
+        sizes = group["axis_sizes"]
+        prefix = tuple(group["coordinate_prefix"])
+        for varying in itertools.product(*(range(size) for size in sizes)):
+            mapped = list(prefix)
+            for axis, value in zip(axes, varying):
+                mapped[axis] = value
+            source_id = _coordinate_node_id(group["tensor_id"], tuple(mapped))
+            if source_id in adjacency and target_id in adjacency:
+                adjacency[source_id].append(target_id)
 
     focused_source_id = None
     focus_reachable = None
