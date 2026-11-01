@@ -9,7 +9,6 @@ on:
       - "src/experiments/trace_computational_path.py"
       - "src/experiments/trace_coordinate_dependencies.py"
       - "src/experiments/trace_focused_coordinate_path.py"
-      - "src/experiments/trace_focused_coordinate_path.py"
       - "tests/**"
       - ".github/workflows/neural-connectivity-ci.yml"
   pull_request:
@@ -18,6 +17,7 @@ on:
       - "src/experiments/run_neural_connectivity_gpt2.py"
       - "src/experiments/trace_computational_path.py"
       - "src/experiments/trace_coordinate_dependencies.py"
+      - "src/experiments/trace_focused_coordinate_path.py"
       - "tests/**"
       - ".github/workflows/neural-connectivity-ci.yml"
   workflow_dispatch:
