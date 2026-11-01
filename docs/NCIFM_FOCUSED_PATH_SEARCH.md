@@ -24,7 +24,7 @@ The existing trace_coordinate_graph API remains the full dependency-closure mode
 2. Start at the target coordinate and walk backward through supported ATen dependency rules using trace_tensor_coordinate. By default, prioritize queued coordinates using shortest tensor-level distance from the requested source; use `search_strategy="breadth_first"` for the previous FIFO ordering.
 3. Explore activation and input-index dependencies.
 4. Retain parameter dependencies as compact records by default. If the requested source is a parameter coordinate, test whether it belongs to a compact parameter group and allow it to terminate the search.
-5. Deduplicate identical activation dependency groups before enumerating their scalar members. This avoids repeatedly expanding the same LayerNorm/softmax input slice for every output coordinate while preserving a valid route through the first encountered target coordinate.
+5. Deduplicate identical activation dependency groups before enumerating their scalar members. This avoids repeatedly expanding the same LayerNorm/softmax input slice for every output coordinate while preserving a valid representative route through the first encountered target coordinate. Focused search does not enumerate every alternate parent edge and is not a complete scalar dependency graph.
 6. Reconstruct a representative path in forward computational order.
 7. Report unsupported operations, value-required dependencies, depth limits and resource limits explicitly.
 
