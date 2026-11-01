@@ -711,7 +711,7 @@ The first GPT-2 coordinate query selected the final-position newline logit (toke
 
 Code inspection identified repeated scheduling of identical source coordinates from shared LayerNorm groups. The same normalized source slice was enqueued once for every output feature, consuming the node budget with duplicate pending coordinates and producing oversized frontier output.
 
-### v0.4.2 — Unique coordinate scheduling and compact linear fan-in (implementation added; validation pending)
+### v0.4.2 — Unique coordinate scheduling and compact linear fan-in (22 local tests passed; GPT-2 trace remains incomplete)
 
 The follow-up implementation on `feature/neural-connectivity-mapper-v01`:
 - Tracks scheduled coordinate IDs so each tensor coordinate is queued at most once.
@@ -720,5 +720,7 @@ The follow-up implementation on `feature/neural-connectivity-mapper-v01`:
 - Aggregates omitted group members into a bounded node-limit frontier record instead of emitting one record per duplicate candidate.
 - Adds a regression test for repeated LayerNorm groups feeding a Linear projection and updates linear/addmm coordinate tests for compact groups.
 
-**Validation is pending.** The v0.4.2 code has not yet been run locally or in hosted CI. The next check is to compile, run the NCIFM test subset, and repeat the coordinate query against the existing v0.4 GPT-2 capture. No GPT-2 token-to-logit path or full scalar graph is claimed yet.
+**Owner validation:** Windows compilation passed and **22 tests passed in 3.77 seconds**. The GPT-2 coordinate query against the saved v0.4 capture produced 20,000 coordinate nodes (the configured node limit), 19,213 explicit edges (below the 50,000 edge limit), 2,306 dependency groups, 4,626 parameter coordinates and 10,767 frontier records. The trace was truncated; it reached zero input coordinates and reported null focus reachability. Of the frontier records, 6,141 were counted as unsupported or unresolved by the tracer's summary. The remaining bottleneck is now the coordinate-node budget, not the explicit edge budget. A null reachability result is inconclusive; it does not show that input token position 3 is disconnected from the selected logit.
+
+**Next diagnostic:** summarize frontier reasons, operator names and module scopes from `apple_coordinate_dependencies_v042.json`. Identify whether the remaining blockers are unsupported operators or broad but supported fan-in before changing limits or adding more coordinate rules. No GPT-2 token-to-logit scalar path or complete scalar graph is claimed yet.
 
