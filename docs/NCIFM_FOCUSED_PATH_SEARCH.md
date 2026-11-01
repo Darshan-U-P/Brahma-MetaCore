@@ -71,3 +71,21 @@ The CLI reads saved prompt token IDs from the trace report so embedding lookup i
 ## Validation boundary
 
 The GPT-2 v0.4.2 query previously reached its 20,000-node limit without reaching the selected input coordinate. That result was inconclusive, not evidence of disconnection. No v0.5 GPT-2 result is claimed until the owner runs the new command and shares the actual output.
+
+## v0.5.3 — Budget draining and search profiling
+
+The v0.5.3 correction changes resource-limit handling. Reaching `max_nodes` or `max_candidates` stops the current expansion from scheduling or examining additional dependencies, but it no longer aborts the entire search immediately. Coordinates already in the queue continue to be processed. This allows the tracer to discover a valid path among work that was already scheduled while still recording that unexplored dependencies remain.
+
+A result may therefore report `status: path_found` together with `resource_limit_reached: true` and `search_complete: false`. The path is a validated dependency route; the resource-limit flag means the search did not exhaust all alternative branches. A path-not-found result remains conclusive only when `search_complete` is true.
+
+The tracer now records:
+- `reachability_seconds`: time spent building the source-reachable tensor set.
+- `search_seconds`: total focused-search loop time.
+- `operator_profile`: coordinate-expansion count and cumulative `trace_tensor_coordinate` time grouped by ATen operator.
+- `queue_peak_size`, `queue_remaining_at_stop`, and `max_depth_processed`.
+- `coordinate_nodes_processed` and `coordinate_nodes_recorded`. The legacy `coordinate_nodes_examined` field now aliases the actual processed count rather than the number of records retained.
+
+Operator timings measure the coordinate-rule expansion call, not total time spent enumerating groups, scheduling coordinates, serializing JSON, or executing the model. Use them to identify candidates for deeper profiling, not as a complete end-to-end performance breakdown.
+
+A regression test uses two reachable projection branches and a two-node scheduling budget. It verifies that the first queued branch is still processed and can yield a valid source-to-target path after the second branch hits the node limit.
+
