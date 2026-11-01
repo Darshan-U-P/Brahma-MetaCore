@@ -1,6 +1,6 @@
 # NCIFM v0.5 — Focused Coordinate Path Search
 
-**Status:** v0.5.1 baseline validated locally by the owner (29 regression tests passed). v0.5.2 source-aware search changes are committed to the feature branch; owner validation is pending.
+**Status:** v0.5.2 baseline validated locally by the owner (31 regression tests passed). v0.5.3 budget-draining and profiling changes are committed to the feature branch; owner validation is pending.
 
 ## Objective
 
