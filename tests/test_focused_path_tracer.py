@@ -144,6 +144,7 @@ def test_shared_layer_norm_activation_group_is_expanded_once():
         "model_output:logits", [0, 0, 0],
         tensor_values={input_id: [[3, 9]]},
         max_depth=32, max_nodes=2000, max_candidates=100,
+        search_strategy="breadth_first",
     )
 
     assert result["result"]["status"] == "path_found"
