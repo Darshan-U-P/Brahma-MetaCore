@@ -26,6 +26,12 @@ def main() -> None:
     parser.add_argument("--max-candidates", type=int, default=100_000)
     parser.add_argument("--max-frontier", type=int, default=10_000)
     parser.add_argument("--parameter-policy", choices=("compact", "expand"), default="compact")
+    parser.add_argument(
+        "--search-strategy",
+        choices=("source_guided", "breadth_first"),
+        default="source_guided",
+        help="Prioritize coordinates near the requested source, or use FIFO breadth-first order.",
+    )
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -78,6 +84,7 @@ def main() -> None:
         max_candidates=args.max_candidates,
         max_frontier=args.max_frontier,
         parameter_policy=args.parameter_policy,
+        search_strategy=args.search_strategy,
     )
     result["query"].update({
         "pass_name": args.pass_name,
