@@ -1,6 +1,6 @@
 # NCIFM v0.5 — Focused Coordinate Path Search
 
-**Status:** v0.5.2 baseline validated locally by the owner (31 regression tests passed). v0.5.3 budget-draining and profiling changes are committed to the feature branch; owner validation is pending.
+**Status:** v0.5.3 is locally validated by the owner (32 regression tests passed) and hosted CI passed. v0.5.4 adds source-guided scheduling; validation is pending.
 
 ## Objective
 
@@ -13,14 +13,15 @@ This mode complements rather than replaces the v0.4 full dependency-closure trac
     trace_focused_coordinate_path(graph, source_tensor_id, source_coordinate,
         target_tensor_id, target_coordinate, tensor_values=None,
         max_depth=128, max_nodes=50000, max_candidates=100000,
-        max_frontier=10000, parameter_policy="compact")
+        max_frontier=10000, parameter_policy="compact",
+        search_strategy="source_guided")
 
 The existing trace_coordinate_graph API remains the full dependency-closure mode.
 
 ## Search behaviour
 
 1. Validate the source and target tensor IDs and coordinates.
-2. Start at the target coordinate and walk backward through supported ATen dependency rules using trace_tensor_coordinate.
+2. Start at the target coordinate and walk backward through supported ATen dependency rules using trace_tensor_coordinate. By default, prioritize queued coordinates using shortest tensor-level distance from the requested source; use `search_strategy="breadth_first"` for the previous FIFO ordering.
 3. Explore activation and input-index dependencies.
 4. Retain parameter dependencies as compact records by default. If the requested source is a parameter coordinate, test whether it belongs to a compact parameter group and allow it to terminate the search.
 5. Deduplicate identical activation dependency groups before enumerating their scalar members. This avoids repeatedly expanding the same LayerNorm/softmax input slice for every output coordinate while preserving a valid route through the first encountered target coordinate.
@@ -72,6 +73,13 @@ The CLI reads saved prompt token IDs from the trace report so embedding lookup i
 
 The GPT-2 v0.4.2 query previously reached its 20,000-node limit without reaching the selected input coordinate. That result was inconclusive, not evidence of disconnection. No v0.5 GPT-2 result is claimed until the owner runs the new command and shares the actual output.
 
+## v0.5.4 — Source-guided scheduling
+
+The source-reachability pass now records shortest tensor-level distances from the requested source instead of only a reachable-tensor set. The default `source_guided` strategy uses these distances to prioritize the backward coordinate queue, exploring source-nearer tensor branches first. `breadth_first` retains FIFO breadth-first ordering for regression comparisons and reproducibility.
+
+This is strictly a scheduling heuristic: it does not discard reachable tensors or scalar coordinates, and it does not replace the operation-local coordinate rules. With sufficient budgets, both strategies search the same supported dependency space. Node, candidate, depth and frontier limits still apply. The result summary records `search_strategy` and `target_tensor_distance`.
+
+A regression test exercises a model in which two LayerNorm output coordinates share an identical activation dependency group. It verifies that deduplicating the shared group still yields a valid representative source-to-target path under breadth-first ordering. A second test verifies that both search strategies find the same known linear dependency.
 ## v0.5.3 — Budget draining and search profiling
 
 The v0.5.3 correction changes resource-limit handling. Reaching `max_nodes` or `max_candidates` stops the current expansion from scheduling or examining additional dependencies, but it no longer aborts the entire search immediately. Coordinates already in the queue continue to be processed. This allows the tracer to discover a valid path among work that was already scheduled while still recording that unexplored dependencies remain.
