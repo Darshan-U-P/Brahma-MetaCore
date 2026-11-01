@@ -28,6 +28,47 @@ def _group_contains(group: dict[str, Any], coordinate: tuple[int, ...]) -> bool:
     return all(coordinate[i] == prefix[i] for i in range(len(prefix)) if i not in varying)
 
 
+def _source_reachable_tensor_ids(
+    graph: dict[str, Any], source_tensor_id: str
+) -> set[str]:
+    """Return tensors reachable from source through captured operator operands.
+
+    This is a conservative tensor-level filter: it can discard a branch only
+    when the captured runtime graph contains no directed path from the requested
+    source tensor to that branch's tensor. Coordinate-level rules still decide
+    whether an exact scalar dependency exists.
+    """
+    nodes = _node_index(graph)
+    if source_tensor_id not in nodes:
+        raise CoordinateTraceError(f"Unknown source tensor {source_tensor_id!r}.")
+
+    operator_inputs: dict[str, list[str]] = {}
+    operator_outputs: dict[str, list[str]] = {}
+    for edge in graph.get("edges", []):
+        relation = edge.get("relation")
+        if relation == "operand":
+            operator_inputs.setdefault(edge["target"], []).append(edge["source"])
+        elif relation == "produces":
+            operator_outputs.setdefault(edge["source"], []).append(edge["target"])
+
+    downstream: dict[str, set[str]] = {}
+    for operator_id, inputs in operator_inputs.items():
+        for input_tensor_id in inputs:
+            downstream.setdefault(input_tensor_id, set()).update(
+                operator_outputs.get(operator_id, [])
+            )
+
+    reachable = {source_tensor_id}
+    pending = deque([source_tensor_id])
+    while pending:
+        current = pending.popleft()
+        for output_tensor_id in downstream.get(current, ()):
+            if output_tensor_id not in reachable:
+                reachable.add(output_tensor_id)
+                pending.append(output_tensor_id)
+    return reachable
+
+
 def trace_focused_coordinate_path(
     graph: dict[str, Any],
     source_tensor_id: str,
@@ -61,6 +102,7 @@ def trace_focused_coordinate_path(
     _validate_coordinate(nodes[source_tensor_id], source)
     _validate_coordinate(nodes[target_tensor_id], target)
     values = tensor_values or {}
+    source_reachable_tensors = _source_reachable_tensor_ids(graph, source_tensor_id)
 
     source_id = _coordinate_node_id(source_tensor_id, source)
     target_id = _coordinate_node_id(target_tensor_id, target)
@@ -189,8 +231,37 @@ def trace_focused_coordinate_path(
                     })
                     found = True
                     break
+                # Parameter tensors cannot lie on a path from an activation
+                # source. Keep their compact provenance, but do not enumerate
+                # them when searching for this source.
+                if group_tensor_id not in source_reachable_tensors:
+                    continue
                 if parameter_policy == "compact":
                     continue
+
+            # Match the exact requested activation coordinate against the
+            # compact group before enumerating its scalar members.
+            if group_tensor_id == source_tensor_id and _group_contains(group, source):
+                toward_target[source_id] = {
+                    "next": current_id, "relation": relation,
+                    "operator": expansion.get("operator"),
+                    "module_scope": expansion.get("module_scope"),
+                }
+                coordinate_nodes.setdefault(source_id, {
+                    "id": source_id, "tensor_id": source_tensor_id,
+                    "tensor_label": group_node.get("label", source_tensor_id),
+                    "tensor_kind": group_node.get("kind"),
+                    "coordinate": list(source),
+                    "tensor_shape": group_node.get("shape"),
+                    "depth": depth + 1,
+                })
+                found = True
+                break
+
+            # A tensor-level disconnected branch cannot contain the requested
+            # source coordinate. Prune it before generating scalar coordinates.
+            if group_tensor_id not in source_reachable_tensors:
+                continue
 
             # Deduplicate identical activation fan-in groups. This is especially
             # important for normalization: every output feature at one sequence
@@ -278,6 +349,8 @@ def trace_focused_coordinate_path(
                 )
                 if dep_tensor_id != source_tensor_id or dep_coordinate != source:
                     continue
+            elif dep_tensor_id not in source_reachable_tensors:
+                continue
             toward_target.setdefault(dep_id, {
                 "next": current_id, "relation": dependency["relation"],
                 "operator": expansion.get("operator"),
@@ -364,6 +437,10 @@ def trace_focused_coordinate_path(
         "frontier": frontier,
         "summary": {
             "coordinate_nodes_examined": len(coordinate_nodes),
+            "coordinate_nodes_processed": len(coordinate_nodes),
+            "coordinate_nodes_scheduled": len(scheduled),
+            "queue_remaining_at_stop": len(queue),
+            "source_reachable_tensor_count": len(source_reachable_tensors),
             "candidate_dependencies_examined": candidates_examined,
             "path_length": len(path),
             "parameter_groups_retained": len(parameter_groups),
@@ -384,5 +461,7 @@ def trace_focused_coordinate_path(
             "A path_not_found result is conclusive only when search_complete is true.",
             "Compact parameter groups identify participating parameter coordinates without enumerating every scalar by default.",
             "Identical activation dependency groups are expanded once; their shared scalar dependencies remain connected to the first encountered target coordinate.",
+            "Tensor-level source reachability prunes disconnected activation branches; exact coordinate dependencies are still determined only by supported operator rules.",
+            "coordinate_nodes_processed counts dequeued coordinates; coordinate_nodes_scheduled includes both processed and queued coordinates.",
         ],
     }
