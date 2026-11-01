@@ -58,6 +58,53 @@ class EmbeddingLayerNormProjection(nn.Module):
         return self.projection(self.normalization(self.embedding(input_ids)))
 
 
+class SharedLayerNormBranches(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.projection = nn.Linear(4, 4, bias=False)
+        self.normalization = nn.LayerNorm(4)
+
+    def forward(self, values):
+        normalized = self.normalization(self.projection(values))
+        return normalized[..., 0] + normalized[..., 1]
+
+
+def test_deduplicated_shared_group_preserves_a_valid_representative_path():
+    graph, input_id = capture(SharedLayerNormBranches(), torch.randn(1, 4))
+    result = trace_focused_coordinate_path(
+        graph,
+        input_id, [0, 2],
+        "model_output:logits", [0],
+        max_depth=32, max_nodes=2000, max_candidates=500,
+        search_strategy="breadth_first",
+    )
+
+    assert result["result"]["status"] == "path_found"
+    assert result["result"]["path_found"] is True
+    assert result["path"]
+    assert result["path"][0]["source_coordinate_node_id"].startswith(
+        "coord::" + input_id + "::["
+    )
+    assert result["path"][-1]["target_coordinate_node_id"].startswith(
+        "coord::model_output:logits::["
+    )
+    assert result["summary"]["activation_dependency_groups_deduplicated"] >= 1
+
+
+def test_source_guided_and_breadth_first_strategies_both_find_linear_path():
+    graph, input_id = capture(LinearOnly(), torch.randn(1, 4))
+    for strategy in ("source_guided", "breadth_first"):
+        result = trace_focused_coordinate_path(
+            graph,
+            input_id, [0, 2],
+            "model_output:logits", [0, 1],
+            max_depth=8, max_nodes=100, max_candidates=100,
+            search_strategy=strategy,
+        )
+        assert result["result"]["path_found"] is True
+        assert result["summary"]["search_strategy"] == strategy
+
+
 def test_shared_layer_norm_activation_group_is_expanded_once():
     ids = torch.tensor([[3, 9]])
     graph, input_id = capture(EmbeddingLayerNormProjection(), ids)
