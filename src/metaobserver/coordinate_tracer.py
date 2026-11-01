@@ -238,8 +238,14 @@ def trace_tensor_coordinate(
             "module_scope": op.get("module_scope"),
         }
 
-    def finish_group(dependency_group: dict[str, Any]) -> dict[str, Any]:
-        if dependency_group["dependency_count"] > max_fan_in:
+    def finish_groups(dependency_groups: list[dict[str, Any]],
+                      dependencies: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        dependencies = dependencies or []
+        required_fan_in = (
+            sum(group["dependency_count"] for group in dependency_groups)
+            + len(dependencies)
+        )
+        if required_fan_in > max_fan_in:
             return {
                 "status": "fan_in_limit",
                 "tensor_id": tensor_id,
@@ -248,18 +254,21 @@ def trace_tensor_coordinate(
                 "dependency_groups": [],
                 "operator": op_name,
                 "module_scope": op.get("module_scope"),
-                "required_fan_in": dependency_group["dependency_count"],
+                "required_fan_in": required_fan_in,
                 "max_fan_in": max_fan_in,
             }
         return {
             "status": "expanded",
             "tensor_id": tensor_id,
             "coordinate": list(coord),
-            "dependencies": [],
-            "dependency_groups": [dependency_group],
+            "dependencies": dependencies,
+            "dependency_groups": dependency_groups,
             "operator": op_name,
             "module_scope": op.get("module_scope"),
         }
+
+    def finish_group(dependency_group: dict[str, Any]) -> dict[str, Any]:
+        return finish_groups([dependency_group])
 
     if output_index != 0:
         return {
@@ -355,19 +364,30 @@ def trace_tensor_coordinate(
         if weight_node["shape"] != [current["shape"][-1], input_width]:
             raise CoordinateTraceError("Linear weight shape is not [out_features, in_features].")
         prefix = coord[:-1]
+        input_group = {
+            "tensor_id": input_node["id"],
+            "coordinate_prefix": list(prefix + (0,)),
+            "varying_axes": [len(input_node["shape"]) - 1],
+            "axis_sizes": [input_width],
+            "relation": "linear_input",
+            "operand_index": input_index,
+            "dependency_count": input_width,
+        }
+        weight_group = {
+            "tensor_id": weight_node["id"],
+            "coordinate_prefix": [output_feature, 0],
+            "varying_axes": [1],
+            "axis_sizes": [input_width],
+            "relation": "linear_weight",
+            "operand_index": weight_index,
+            "dependency_count": input_width,
+        }
         dependencies = []
-        for feature in range(input_width):
-            dependencies.append(dependency(
-                input_index, prefix + (feature,), "linear_input"
-            ))
-            dependencies.append(dependency(
-                weight_index, (output_feature, feature), "linear_weight"
-            ))
         if bias_index in operands:
             dependencies.append(dependency(
                 bias_index, (output_feature,), "linear_bias"
             ))
-        return finish(dependencies)
+        return finish_groups([input_group, weight_group], dependencies)
 
     # Matrix multiply / batched matrix multiply.
     if op_name.startswith(("aten::matmul.", "aten::bmm.")):
@@ -399,15 +419,25 @@ def trace_tensor_coordinate(
             return tuple(mapped[batch_rank - source_rank:])
         left_prefix = batch_map(left_shape[:-2], left_batch_rank)
         right_prefix = batch_map(right_shape[:-2], right_batch_rank)
-        dependencies = []
-        for inner in range(contracted):
-            dependencies.append(dependency(
-                left_index, left_prefix + (row, inner), "matmul_left"
-            ))
-            dependencies.append(dependency(
-                right_index, right_prefix + (inner, column), "matmul_right"
-            ))
-        return finish(dependencies)
+        left_group = {
+            "tensor_id": left["id"],
+            "coordinate_prefix": list(left_prefix + (row, 0)),
+            "varying_axes": [len(left_shape) - 1],
+            "axis_sizes": [contracted],
+            "relation": "matmul_left",
+            "operand_index": left_index,
+            "dependency_count": contracted,
+        }
+        right_group = {
+            "tensor_id": right["id"],
+            "coordinate_prefix": list(right_prefix + (0, column)),
+            "varying_axes": [len(right_shape) - 2],
+            "axis_sizes": [contracted],
+            "relation": "matmul_right",
+            "operand_index": right_index,
+            "dependency_count": contracted,
+        }
+        return finish_groups([left_group, right_group])
 
     # addmm: self + mat1 @ mat2.
     if op_name.startswith("aten::addmm."):
@@ -424,14 +454,25 @@ def trace_tensor_coordinate(
                        "addmm_addend")
         ]
         inner_size = mat1["shape"][-1]
-        for inner in range(inner_size):
-            dependencies.append(dependency(
-                mat1_index, (matrix_coordinate[0], inner), "matmul_left"
-            ))
-            dependencies.append(dependency(
-                mat2_index, (inner, matrix_coordinate[1]), "matmul_right"
-            ))
-        return finish(dependencies)
+        left_group = {
+            "tensor_id": mat1["id"],
+            "coordinate_prefix": [matrix_coordinate[0], 0],
+            "varying_axes": [1],
+            "axis_sizes": [inner_size],
+            "relation": "matmul_left",
+            "operand_index": mat1_index,
+            "dependency_count": inner_size,
+        }
+        right_group = {
+            "tensor_id": mat2["id"],
+            "coordinate_prefix": [0, matrix_coordinate[1]],
+            "varying_axes": [0],
+            "axis_sizes": [inner_size],
+            "relation": "matmul_right",
+            "operand_index": mat2_index,
+            "dependency_count": inner_size,
+        }
+        return finish_groups([left_group, right_group], dependencies)
 
     # Layer normalization: an output feature depends on the whole normalized
     # slice, plus the matching affine scale and shift when present.
@@ -706,6 +747,11 @@ def trace_coordinate_graph(
     dependency_groups: list[dict[str, Any]] = []
     frontier: list[dict[str, Any]] = []
     queue = deque([(target_tensor_id, target_coord, 0)])
+    # Track queued and visited coordinates together. Dependency groups often
+    # describe the same source slice for many output coordinates (for example,
+    # every feature in one LayerNorm slice); queue each source scalar only once.
+    scheduled_coordinate_ids = {_coordinate_node_id(target_tensor_id, target_coord)}
+    expanded_group_keys: set[tuple[Any, ...]] = set()
     truncated = False
 
     while queue:
@@ -777,22 +823,43 @@ def trace_coordinate_graph(
             axes = group["varying_axes"]
             sizes = group["axis_sizes"]
             prefix = tuple(group["coordinate_prefix"])
+            group_key = (
+                group["tensor_id"], prefix, tuple(axes), tuple(sizes)
+            )
+            # Many output scalars can share an identical dependency group.
+            # Preserve every logical group record, but schedule its source
+            # coordinates only once.
+            if group_key in expanded_group_keys:
+                continue
+            expanded_group_keys.add(group_key)
+
+            omitted_group_members = 0
             for varying in itertools.product(*(range(size) for size in sizes)):
                 mapped = list(prefix)
                 for axis, value in zip(axes, varying):
                     mapped[axis] = value
                 source_coordinate = tuple(mapped)
                 source_id = _coordinate_node_id(group["tensor_id"], source_coordinate)
-                if len(coordinate_nodes) + len(queue) >= max_nodes:
-                    truncated = True
-                    frontier.append({
-                        "coordinate_node_id": source_id,
-                        "tensor_id": group["tensor_id"],
-                        "coordinate": list(source_coordinate),
-                        "reason": "max_nodes",
-                    })
+                if source_id in scheduled_coordinate_ids:
                     continue
+                if len(scheduled_coordinate_ids) >= max_nodes:
+                    truncated = True
+                    omitted_group_members += 1
+                    continue
+                scheduled_coordinate_ids.add(source_id)
                 queue.append((group["tensor_id"], source_coordinate, depth + 1))
+
+            if omitted_group_members:
+                frontier.append({
+                    "coordinate_node_id": coordinate_id,
+                    "tensor_id": group["tensor_id"],
+                    "coordinate_prefix": list(prefix),
+                    "varying_axes": list(axes),
+                    "axis_sizes": list(sizes),
+                    "reason": "max_nodes",
+                    "omitted_group_member_count": omitted_group_members,
+                    "group_id": group_id,
+                })
         for item in expansion.get("dependencies", []):
             source_coordinate = tuple(item["coordinate"])
             source_id = _coordinate_node_id(item["tensor_id"], source_coordinate)
@@ -814,8 +881,18 @@ def trace_coordinate_graph(
                 "operator": expansion.get("operator"),
                 "module_scope": expansion.get("module_scope"),
             })
-            if source_id not in coordinate_nodes:
-                queue.append((item["tensor_id"], source_coordinate, depth + 1))
+            if source_id not in scheduled_coordinate_ids:
+                if len(scheduled_coordinate_ids) >= max_nodes:
+                    truncated = True
+                    frontier.append({
+                        "coordinate_node_id": source_id,
+                        "tensor_id": item["tensor_id"],
+                        "coordinate": list(source_coordinate),
+                        "reason": "max_nodes",
+                    })
+                else:
+                    scheduled_coordinate_ids.add(source_id)
+                    queue.append((item["tensor_id"], source_coordinate, depth + 1))
 
     target_coordinate_id = _coordinate_node_id(target_tensor_id, target_coord)
     adjacency: dict[str, list[str]] = {node_id: [] for node_id in coordinate_nodes}
