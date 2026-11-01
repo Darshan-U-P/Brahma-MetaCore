@@ -1,6 +1,6 @@
 # NCIFM v0.5 — Focused Coordinate Path Search
 
-**Status:** Implementation committed to the feature branch. Local owner execution and GPT-2 validation are still pending.
+**Status:** v0.5.1 baseline validated locally by the owner (29 regression tests passed). v0.5.2 source-aware search changes are committed to the feature branch; owner validation is pending.
 
 ## Objective
 
@@ -29,6 +29,20 @@ The existing trace_coordinate_graph API remains the full dependency-closure mode
 
 The search does not expand parameter groups by default. Set parameter_policy to expand only when a parameter-source query or an explicitly broader search requires it. Identical activation groups are expanded once and counted in the result summary as `activation_dependency_groups_deduplicated`; the first encountered group target is retained as the representative route. Candidate and node budgets remain in force.
 
+## v0.5.2 source-aware search
+
+The focused tracer now builds a conservative tensor-level reachability index by following captured operand-to-operator-to-output edges from the requested source tensor. Activation dependency groups and direct activation dependencies whose tensor IDs are not reachable from that source are skipped before scalar-coordinate scheduling. This pruning is only a coarse impossibility filter; supported coordinate rules remain the authority for exact scalar dependencies.
+
+Before enumerating a compact activation dependency group, the tracer checks whether the exact requested source coordinate belongs to that group. A match creates the exact source-to-current-coordinate link immediately, avoiding expansion of the rest of the group. Parameter groups remain visible as compact provenance records, but unrelated parameter tensors are not expanded while searching for an activation source.
+
+New summary fields:
+- `coordinate_nodes_processed`: coordinates dequeued and expanded (also retained under the legacy `coordinate_nodes_examined` field).
+- `coordinate_nodes_scheduled`: processed plus queued coordinates.
+- `queue_remaining_at_stop`: coordinates still queued when search stopped.
+- `source_reachable_tensor_count`: number of runtime tensor nodes reachable from the requested source tensor.
+
+These metrics distinguish a full scheduling budget from the smaller number of coordinates actually processed. Tensor-level reachability does not prove a coordinate-level path; it only removes branches that cannot contain the requested source tensor at all.
+
 ## Result interpretation
 
 Statuses:
@@ -46,7 +60,7 @@ Embedding lookup indices are routing dependencies: the token ID selects an embed
     python -m py_compile src/metaobserver/focused_path_tracer.py src/experiments/trace_focused_coordinate_path.py
     python -m pytest tests/test_focused_path_tracer.py tests/test_coordinate_tracer.py tests/test_path_tracer.py tests/test_neural_connectivity.py tests/test_metaobserver.py -q
 
-The focused tests cover a known embedding/mean/linear path, an embedding/LayerNorm/linear path with shared-group deduplication, an explicitly requested parameter coordinate, unsupported operators, node-budget exhaustion, invalid coordinates and identical source/target coordinates. Existing full-closure tests remain in the regression suite.
+The focused tests cover a known embedding/mean/linear path, an embedding/LayerNorm/linear path with shared-group deduplication, exact activation-source matching without group enumeration, pruning of an unrelated second input branch, an explicitly requested parameter coordinate, unsupported operators, node-budget exhaustion, invalid coordinates and identical source/target coordinates. Existing full-closure tests remain in the regression suite.
 
 ## GPT-2 apple experiment
 
