@@ -359,6 +359,31 @@ def trace_focused_coordinate_path(
             dep_coordinate = tuple(dependency["coordinate"])
             dep_id = _coordinate_node_id(dep_tensor_id, dep_coordinate)
             dep_node = nodes[dep_tensor_id]
+            # Exact source matches are terminal checks, not branch expansion.
+            # Check them before enforcing the candidate-enumeration budget.
+            if dep_id == source_id:
+                if dep_node.get("kind") == "parameter":
+                    retain_parameter(
+                        dep_tensor_id, dependency["relation"], coordinate=dep_coordinate,
+                        operator=expansion.get("operator"),
+                        module_scope=expansion.get("module_scope"),
+                        target_coordinate_id=current_id,
+                    )
+                toward_target[source_id] = {
+                    "next": current_id, "relation": dependency["relation"],
+                    "operator": expansion.get("operator"),
+                    "module_scope": expansion.get("module_scope"),
+                }
+                coordinate_nodes.setdefault(source_id, {
+                    "id": source_id, "tensor_id": source_tensor_id,
+                    "tensor_label": dep_node.get("label", source_tensor_id),
+                    "tensor_kind": dep_node.get("kind"),
+                    "coordinate": list(source),
+                    "tensor_shape": dep_node.get("shape"),
+                    "depth": depth + 1,
+                })
+                found = True
+                break
             candidates_examined += 1
             if candidates_examined > max_candidates:
                 resource_limited = True
