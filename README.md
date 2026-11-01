@@ -682,7 +682,7 @@ The project owner ran the query against the saved GPT-2 Small prompt-prefill tra
 
 The 70-node shortest route is one representative route, not the complete computational flow or an attribution ranking. Endpoint coordinates annotate positions in whole tensors; they do not isolate token-to-neuron or neuron-to-logit scalar dependencies. The full upstream graph includes attention and MLP operations as well as residual-stream paths. Computational dependency does not establish semantic meaning or causal contribution.
 
-### v0.4 — Coordinate-resolved dependency tracing (implementation added; local validation pending)
+### v0.4 — Coordinate-resolved dependency tracing (implementation and local test validation complete)
 
 The v0.4 implementation adds `src/metaobserver/coordinate_tracer.py` and `src/experiments/trace_coordinate_dependencies.py`. Runtime operator nodes now retain JSON-safe ATen argument metadata, including named tensor-operand references and scalar arguments. The runtime graph schema version is `0.3.0`; tensor contents are not copied into this metadata.
 
@@ -698,6 +698,13 @@ Unknown/fused operations and depth, fan-in, node or edge limits are explicit fro
 
 **Compatibility:** v0.2 GPT-2 runtime graph files predate operator-argument capture. Generate a new GPT-2 trace before using the v0.4 coordinate CLI; do not reuse `apple_demo_v02/runtime_computational_graphs.json` for coordinate tracing. See `docs/NCIFM_COORDINATE_TRACING.md`.
 
-**Hosted validation:** GitHub Actions run [41305564246](https://github.com/Darshan-U-P/Brahma-MetaCore/actions/runs/41305564246) passed module compilation and **20 tests** (coordinate tracer, path tracer, neural connectivity, and MetaObserver). Local Windows validation of v0.4 remains pending.
+**Validation:** The project owner reported successful Windows compilation and **20 tests passed in 3.81 seconds**. The fresh GPT-2 Small trace ran on `cuda:0`, captured 569 operators / 743 tensor nodes / 1,394 edges for each of prompt-prefill and generation-step-1, and retained exact prompt-logit parity (maximum absolute difference 0.0). Hosted GitHub Actions run [41305564246](https://github.com/Darshan-U-P/Brahma-MetaCore/actions/runs/41305564246) also passed compilation and 20 tests.
 
 The v0.4 coordinate graph describes mathematical operand dependencies for one recorded execution. It does not yet establish contribution magnitude, semantic function, causal necessity, or a complete neuron/attention-head map of GPT-2.
+
+
+### v0.4.1 — Compact high-fan-in dependency groups (implementation added; validation pending)
+
+The first owner-run GPT-2 coordinate query selected the final-position newline logit (token ID 198, probability 0.35327) and input token position 3 (`Ġapple`). It reached the 50,000-edge cap while expanding the final LayerNorm: one output feature depends on the full 768-feature normalization slice, and tracing all 768 output features naïvely creates 768 × 768 scalar dependency edges. The run produced 5,494 coordinate nodes, 50,000 edges, 884 parameter coordinates, zero reached input coordinates, and a null focus-reachability result. This is **inconclusive**, not evidence of no input dependency.
+
+The v0.4.1 implementation replaces LayerNorm, softmax and reduction fan-in expansion with compact dependency-group records, while recursively visiting the member coordinates. It also stops the edge-expansion loop immediately after the explicit edge cap instead of emitting an unbounded duplicate frontier. A new LayerNorm group test verifies that all four input coordinates are reached in a small model. Local and hosted validation of this follow-up remains pending.
